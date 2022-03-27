@@ -95,7 +95,7 @@ public class Main
                 // Starting RIP: implement RIP since not using a static route table
                 RouteTable routeTable = ((Router) dev).getRouteTable();
                 for (Iface i : dev.getInterfaces().values()) {
-                    routeTable.insert(i.getIpAddress(), 0, i.getSubnetMask(), i);
+                    routeTable.insert((i.getIpAddress() & i.getSubnetMask()), 0, i.getSubnetMask(), i);
                 }
                 System.out.println(routeTable);
             }
