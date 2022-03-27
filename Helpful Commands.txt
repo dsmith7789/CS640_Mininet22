@@ -8,7 +8,7 @@ sudo netstat -nlp | grep 8888
 sudo kill -9 <number from above>
 
 // Start mininet
-sudo ./run_mininet.py topos/single_rt.topo - a
+sudo ./run_mininet.py topos/single_rt.topo -a
 
 // "Reset mininet"
 sudo mn -c

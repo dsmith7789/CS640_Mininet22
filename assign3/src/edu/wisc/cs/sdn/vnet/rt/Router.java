@@ -82,17 +82,22 @@ public class Router extends Device
 	 */
 	public void handlePacket(Ethernet etherPacket, Iface inIface)
 	{
+		System.out.println("Do we get to this point?");
 		System.out.println("*** -> Received packet: " +
 				etherPacket.toString().replace("\n", "\n\t"));
 
 		/********************************************************************/
 		/* TODO: Handle packets                                             */
 
+		System.out.println("The type of the packet is " + etherPacket.getEtherType());
 		switch(etherPacket.getEtherType())
 		{
 		case Ethernet.TYPE_IPv4:
+			System.out.println("This is inside case statement for Ethernet IPv4 packets.");
 			this.handleIpPacket(etherPacket, inIface);
 			break;
+		case 2054: // TODO: added for debugging, remove this later
+			System.out.println("Not an IPv4 packet.");
 		// Ignore all other packet types, for now
 		}
 
@@ -101,6 +106,7 @@ public class Router extends Device
 
 	private void handleIpPacket(Ethernet etherPacket, Iface inIface)
 	{
+		System.out.println("Do we get here?");
 		// Make sure it's an IP packet
 		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4)
 		{ return; }
@@ -119,10 +125,11 @@ public class Router extends Device
 		{ return; }
 
 		// Check TTL
+		System.out.println("The packet's TTL is " + ipPacket.getTtl());
 		ipPacket.setTtl((byte)(ipPacket.getTtl()-1));
 		if (0 == ipPacket.getTtl())
 		{ 
-            sendIcmpPacket(etherPacket, inIface, 11, 0);
+            sendIcmpPacket(etherPacket, inIface, 11, 0, false);
             return; 
         }
 
@@ -133,7 +140,13 @@ public class Router extends Device
 		for (Iface iface : this.interfaces.values())
 		{
 			if (ipPacket.getDestinationAddress() == iface.getIpAddress())
-			{ return; }
+			{ 
+				if ((ipPacket.getProtocol() == IPv4.PROTOCOL_UDP) || (ipPacket.getProtocol() == IPv4.PROTOCOL_TCP)) {
+                    sendIcmpPacket(etherPacket, inIface, 3, 3, false);
+                } else if (ipPacket.getProtocol() == IPv4.PROTOCOL_ICMP) {
+					sendIcmpPacket(etherPacket, inIface, 0, 0, true);
+				}
+			}
 		}
 
 		// Do route lookup and forward
@@ -156,7 +169,10 @@ public class Router extends Device
 
 		// If no entry matched, do nothing
 		if (null == bestMatch)
-		{ return; }
+		{ 
+			sendIcmpPacket(etherPacket, inIface, 3, 0, false);
+			return; 
+		}
 
 		// Make sure we don't sent a packet back out the interface it came in
 		Iface outIface = bestMatch.getInterface();
@@ -174,7 +190,10 @@ public class Router extends Device
 		// Set destination MAC address in Ethernet header
 		ArpEntry arpEntry = this.arpCache.lookup(nextHop);
 		if (null == arpEntry)
-		{ return; }
+		{ 
+			sendIcmpPacket(etherPacket, inIface, 3, 1, false);
+			return; 
+		}
 		etherPacket.setDestinationMACAddress(arpEntry.getMac().toBytes());
 
 		this.sendPacket(etherPacket, outIface);
@@ -187,12 +206,79 @@ public class Router extends Device
     * @param inIface the interface on the router that the Ethernet packet came in on.
     * @param type the type of ICMP message to send
     * @param code the code of ICMP message to send
+	* @param echoMode to handle if we're sending a reply to an ICMP echo request
     */
-    private void sendIcmpPacket(Ethernet ethernetOriginalPacket, Iface inIface, int type, int code) 
+    private void sendIcmpPacket(Ethernet ethernetOriginalPacket, Iface inIface, int type, int code, boolean echoMode) 
     {
-    /*********** BEGIN SETUP ETHERNET HEADER ************/
+		// set up the new Ethernet packet
+		Ethernet ethernetNewPacket = constructEthernetHeader(ethernetOriginalPacket, inIface);
+		IPv4 ipOriginalPacket = (IPv4)ethernetOriginalPacket.getPayload();
 
-        System.out.println("The received ethernet packet's Source MAC is: " + ethernetOriginalPacket.getSourceMAC().toString());
+		// set up the new IP Packet
+        IPv4 ipNewPacket = constructIPv4Header(ipOriginalPacket, inIface, echoMode);
+
+		// set up the new ICMP Packet
+        ICMP icmp = new ICMP();
+        icmp.setIcmpType((byte) type);
+        icmp.setIcmpCode((byte) code);
+        icmp.resetChecksum();
+    
+		// retrieve the ICMP Payload
+		if (echoMode == false) {
+			byte[] newPayload = copyIpPacketPayload(ipOriginalPacket, 8);
+		} else {
+			byte[] newPayload = copyIpPacketPayload(ipOriginalPacket, -1);
+		}
+
+		// nest the packets
+        Data data = new Data();
+        data.setData(newPayload);
+        icmp.setPayload(data);
+        ipNewPacket.setPayload(icmp);
+        ethernetNewPacket.setPayload(ipNewPacket);
+        
+		// send the new Ethernet packet to the proper destination
+        System.out.println("Now we're calling the sendPacket method for the Ethernet packet we created for the ICMP message.");
+        this.sendPacket(ethernetNewPacket, inIface);
+        return;
+    }
+
+	/**
+	* Given an IP Packet, this will copy the payload up to the requested number of bytes, and return the copy as a byte array.
+	* @param originalIpPacket this is the packet we're copying the payload from
+	* @param bytesToCopy how many bytes of the payload we want to copy. If copying the entire payload, set this to -1
+	 */
+	private byte[] copyIpPacketPayload(IPv4 originalIpPacket, int bytesToCopy) {
+		byte[] newPayload = new byte[arraySize];
+		byte[] originalIpPacketContent = originalIpPacket.serialize();
+    	byte ipOriginalPacketHeaderLength = originalIpPacket.getHeaderLength();   // convert from 4 byte words to bytes
+        System.out.println("Header length in bytes = " +(4 * ipOriginalPacketHeaderLength));
+		if (bytesToCopy == -1) {
+			// copying the whole payload of the original IP Packet
+			int arraySize = (4 * ipOriginalPacketHeaderLength) + 4 + originalIpPacketContent.size(); // 4 byes of padding and the 8 bytes of the original IP Packet
+        	System.out.println("new payload array size = " + arraySize);
+       		byte[] newPayload = new byte[arraySize];
+        	System.arraycopy(originalIpPacketContent, 0, newPayload, 4, newPayload.length - 4);
+		} else {
+			// copying only a specific number of bytes from the payload	
+			int arraySize = (4 * ipOriginalPacketHeaderLength) + 4 + bytesToCopy; // 4 byes of padding and the 8 bytes of the original IP Packet
+        	System.out.println("new payload array size = " + arraySize);
+        	byte[] newPayload = new byte[arraySize];
+        	System.arraycopy(originalIpPacketContent, 0, newPayload, 4, newPayload.length - 4);
+		}
+		return newPayload;
+	}
+
+	/**
+	* Given an Ethernet Packet, this will create a new Ethernet packet and set up the header such that:
+	*	Source MAC Address = the MAC Address of the interface we'll be sending the packet out of
+	*	Destin MAC Address = found by doing a lookup in the route table to find the proper gateway IP address (next router), then finding the
+	*		corresponding MAC address using the ARP cache (if sending to another router)
+	* @param ethernetOriginalPacket the Ethernet packet that the router received
+	* @param inIface which interface on the router the Ethernet packet came in
+	 */
+	private Ethernet constructEthernetHeader(Ethernet originalEthernetPacket, Iface inIface) {
+		System.out.println("The received ethernet packet's Source MAC is: " + ethernetOriginalPacket.getSourceMAC().toString());
         System.out.println("The received ethernet packet's Destination MAC is: " + ethernetOriginalPacket.getDestinationMAC().toString());
         Ethernet ethernetNewPacket = new Ethernet();
         IPv4 ipOriginalPacket = (IPv4)ethernetOriginalPacket.getPayload();
@@ -243,59 +329,35 @@ public class Router extends Device
             ethernetNewPacket.setDestinationMACAddress(arpEntryMacAddrString);
         }      
         System.out.println("We set the ICMP Ethernet Packet's Destination MAC Address to: " + ethernetNewPacket.getDestinationMAC().toString());
-    
-    /*********** END SETUP ETHERNET HEADER ************/  
-    
-    /*********** BEGIN SETUP IPv4 HEADER ************/
+		
+		return ethernetNewPacket;
+	}
 
-        IPv4 ipNewPacket = new IPv4();
+	/**
+	* Given an IPv4 Packet, this will create a new IPv4 packet and set up the header such that:
+	*	Source IP Address = if not echo mode, this will be the address of the interface that the original packet arrived on. 
+	*		If in echo mode, this will be the destination IP from the IP header in the echo request.
+	*	Destin IP Address = the source IP address of the original IP packet
+	* @param originalIpPacket the IP packet that was the payload of the Ethernet packet that the router received
+	* @param inIface which interface on the router the Ethernet packet came in
+	* @param echoMode determines how we'll set the Source IP Address on the new IP Packet
+	 */
+	private IPv4 constructIPv4Header(IPv4 originalIpPacket, Iface inIface, boolean echoMode) {
+		IPv4 ipNewPacket = new IPv4();
         ipNewPacket.setTtl((byte) 64);
         ipNewPacket.setProtocol(IPv4.PROTOCOL_ICMP);
-        ipNewPacket.setSourceAddress(inIface.getIpAddress());
-        System.out.println("We set the ICMP IP Packet's Source IP Address to: " + ipNewPacket.fromIPv4Address(ipNewPacket.getSourceAddress()));
-        ipNewPacket.setDestinationAddress(ipOriginalPacket.getSourceAddress());
+        
+        if (echoMode == true) {
+			// set source IP on new packet as the destination IP from the IP header in the echo request.
+			ipNewPacket.setSourceAddress(originalIpPacket.getDestinationAddress());
+		} else {
+			// set source IP on new packet as the IP address of the interface that the original packet arrived on.
+			ipNewPacket.setSourceAddress(inIface.getIpAddress());
+		}
+		System.out.println("We set the ICMP IP Packet's Source IP Address to: " + ipNewPacket.fromIPv4Address(ipNewPacket.getSourceAddress()));
+		ipNewPacket.setDestinationAddress(ipOriginalPacket.getSourceAddress());
         System.out.println("We set the ICMP IP Packet's Destination IP Address to: " + ipNewPacket.fromIPv4Address(ipNewPacket.getDestinationAddress()));
         ipNewPacket.resetChecksum();
-    
-    /*********** END SETUP IPv4 HEADER ************/
-
-    /*********** BEGIN SETUP ICMP HEADER ************/
-
-        ICMP icmp = new ICMP();
-        icmp.setIcmpType((byte) type);
-        icmp.setIcmpCode((byte) code);
-        icmp.resetChecksum();
-
-    /*********** END SETUP ICMP HEADER ************/
-    
-    /*********** BEGIN SETUP ICMP PAYLOAD ************/
-
-        // TA suggestion: try this format to copy your data in the ICMP packet.
-        // System.arraycopy(oldPacketContent, 0, newPayload, 4, newPayload.length - 4);
-        // format = arraycopy(Object src, int srcPos, Object dest, int destPos, int length)
-        byte[] originalIpPacketContent = ipOriginalPacket.serialize();
-        byte ipOriginalPacketHeaderLength = ipOriginalPacket.getHeaderLength();   // convert from 4 byte words to bytes
-        System.out.println("Header length in bytes = " +(4 * ipOriginalPacketHeaderLength));
-        int arraySize = (4 * ipOriginalPacketHeaderLength) + 4 + 8; // 4 byes of padding and the 8 bytes of the original IP Packet
-        System.out.println("new payload array size = " + arraySize);
-        byte[] newPayload = new byte[arraySize];
-        System.arraycopy(originalIpPacketContent, 0, newPayload, 4, newPayload.length - 4);
-    
-    /*********** END SETUP ICMP PAYLOAD ************/
-
-
-    /*********** BEGIN NESTING PACKETS ************/
-
-        Data data = new Data();
-        data.setData(newPayload);
-        icmp.setPayload(data);
-        ipNewPacket.setPayload(icmp);
-        ethernetNewPacket.setPayload(ipNewPacket);
-                
-    /*********** END NESTING PACKETS ************/
-
-        System.out.println("Now we're calling the sendPacket method for the Ethernet packet we created for the ICMP message.");
-        this.sendPacket(ethernetNewPacket, inIface);
-        return;
-    }
+		return ipNewPacket;
+	}
 }
