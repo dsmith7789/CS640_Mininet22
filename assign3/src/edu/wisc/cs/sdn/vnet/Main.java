@@ -107,7 +107,25 @@ public class Main
 
 		// Read messages from the server until the server closes the connection
 		System.out.println("<-- Ready to process packets -->");
-		while (vnsComm.readFromServer());
+		while (vnsComm.readFromServer()) {
+			if (routeTableFile == null) {
+				// send unsolicited RIP responses every 10 seconds
+				Timer timer = new Timer();
+				timer.schedule(new TimerTask() {
+					@Override
+					public void run() {
+						for (RouteEntry routeEntry : dev.getRouteTable()) {
+							RIPv2 ripPacket = new RIPv2();
+							ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
+							for (RouteEntry r : dev.getRouteTable()) {
+								RIPv2Entry ripEntry = new RIPv2Entry();
+							}
+							dev.sendPacket(routeEntry.getInterface())
+						}
+					}
+				}, 0, 10000);			
+			}
+		}
 		
 		// Shutdown the router
 		dev.destroy();

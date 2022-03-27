@@ -95,7 +95,7 @@ public class Router extends Device
 			// check if receiving RIP request
 			IPv4 ipPacket = (IPv4) etherPacket.getPayload();
 			if ((ipPacket.getProtocol() == IPv4.PROTOCOL_UDP) && (((UDP)ipPacket).getDestinationPort() == UDP.RIP_PORT)) {
-				handleRipPacket(ipPacket, inIface);
+				processRipPacket(ipPacket, inIface);
 			} else {
 				this.handleIpPacket(etherPacket, inIface);
 			}
@@ -106,13 +106,31 @@ public class Router extends Device
 		/********************************************************************/
 	}
 
-	private void handleRipRequest(IPv4 ipPacket, Iface inIface) {
+	private void processRipPacket(IPv4 ipPacket, Iface inIface) {
+		RIPv2 receivedRipPacket = (RIPv2) ipPacket.getPayload();
+		if (receivedRipPacket.getCommand() == RIPv2.COMMAND_REQUEST) {
+			// create new objects
+			Ethernet newEthernetPacket = new Ethernet();
+			UDP newUdpPacket = new UDP();
+			RIPv2 newRipPacket = new RIPv2();
+
+			
+
+			// nest packets
+			newEthernetPacket.setPayload(newUdpPacket);
+			newUdpPacket.setPayload(newRipPacket);
+			sendRipResponse(newEthernetPacket, inIface);
+		}
+	}
+
+	private void sendRipResponse(Ethernet ethernetPacket, Iface inIface) {
+
+	}
+
+	private void sendRipRequest(IPv4 ipPacket, Iface inIface) {
 		RIPv2 ripPacket = (RIPv2) ipPacket.getPayload();
 	}
-
-	private void handleRipResponse(IPv4 ipPacket, Iface inIface) {
-
-	}
+	
 
 	private void handleIpPacket(Ethernet etherPacket, Iface inIface)
 	{
