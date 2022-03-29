@@ -27,6 +27,13 @@ public class ArpCache {
 	{ this.entries = new ConcurrentHashMap<Integer,ArpEntry>(); }
 
 	/**
+	* Retrieve the entries in the ARP Cache
+	 */
+	public Map<Integer, ArpEntry> getEntries() {
+		return this.entries;
+	}
+
+	/**
 	 * Insert an entry in the ARP cache for a specific IP address, MAC address
 	 * pair.
 	 * @param mac MAC address corresponding to IP address

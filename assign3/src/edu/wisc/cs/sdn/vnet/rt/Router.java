@@ -20,6 +20,9 @@ public class Router extends Device
 	/** ARP cache for the router */
 	private ArpCache arpCache;
 
+	/** Timestamp for when the router last sent an unsolicited RIP Response */
+	private long lastSent;
+
 	/**
 	 * Creates a router for a specific host.
 	 * @param host hostname for the router
@@ -29,6 +32,21 @@ public class Router extends Device
 		super(host,logfile);
 		this.routeTable = new RouteTable();
 		this.arpCache = new ArpCache();
+		this.lastSent = 0;
+	}
+
+	/**
+	* Get the timestamp for when we last sent an unsolicitied RIP Response
+	 */
+	public long getLastSent() {
+		return this.lastSent;
+	}
+
+	/**
+	* Set the timestamp for when we send an unsolicitied RIP Response
+	 */
+	public void setLastSent(long timestamp) {
+		this.lastSent = timestamp;
 	}
 
 	/**
@@ -94,8 +112,14 @@ public class Router extends Device
 		case Ethernet.TYPE_IPv4:
 			// check if receiving RIP request
 			IPv4 ipPacket = (IPv4) etherPacket.getPayload();
-			if ((ipPacket.getProtocol() == IPv4.PROTOCOL_UDP) && (((UDP)ipPacket).getDestinationPort() == UDP.RIP_PORT)) {
-				processRipPacket(ipPacket, inIface);
+			UDP udpPacket = (UDP) etherPacket.getPayload();
+			if ((ipPacket.getProtocol() == IPv4.PROTOCOL_UDP) && (udpPacket.getDestinationPort() == UDP.RIP_PORT)) {
+				RIPv2 ripPacket = (RIPv2) ipPacket.getPayload();
+				if (ripPacket.getCommand() == RIPv2.COMMAND_REQUEST) {
+					sendRipResponse(etherPacket, inIface);
+				} else {
+					processRipResponse(etherPacket, inIface);
+				}
 			} else {
 				this.handleIpPacket(etherPacket, inIface);
 			}
@@ -106,31 +130,94 @@ public class Router extends Device
 		/********************************************************************/
 	}
 
-	private void processRipPacket(IPv4 ipPacket, Iface inIface) {
-		RIPv2 receivedRipPacket = (RIPv2) ipPacket.getPayload();
-		if (receivedRipPacket.getCommand() == RIPv2.COMMAND_REQUEST) {
-			// create new objects
-			Ethernet newEthernetPacket = new Ethernet();
-			UDP newUdpPacket = new UDP();
-			RIPv2 newRipPacket = new RIPv2();
+	/**
+	* Router uses this method to process the information in the RIP Response received and 
+	* can decide to update its route table if needed, based on what was in the RIP packet.
+	* @param receivedEthernetPacket contains the RIP request
+	* @param inIface the interface on the router that the packet came in on
+	 */
+	private void processRipResponse(Ethernet receivedEthernetPacket, Iface inIface) {
+		IPv4 receivedIpPacket = (IPv4) receivedEthernetPacket.getPayload();
+		RIPv2 receivedRipPacket = (RIPv2) receivedIpPacket.getPayload();
 
-			
+		for (RIPv2Entry ripEntry : receivedRipPacket.getEntries()) {
+			int ripDestinationIpAddress = ripEntry.getAddress();
+			int ripSubnetMask = ripEntry.getSubnetMask();
+			int ripMetric = ripEntry.getMetric();
 
-			// nest packets
-			newEthernetPacket.setPayload(newUdpPacket);
-			newUdpPacket.setPayload(newRipPacket);
-			sendRipResponse(newEthernetPacket, inIface);
+			MACAddress gatewayMacAddress = receivedEthernetPacket.getSourceMAC();
+			int gatewayIpAddress = 0;
+			for (ArpEntry arpEntry : this.arpCache.getEntries().values()) {
+				if (arpEntry.getMac() == gatewayMacAddress) {
+					gatewayIpAddress = arpEntry.getIp();
+					break;
+				}
+			}
+
+			RouteEntry existingRouteEntry = this.routeTable.find(ripDestinationIpAddress, ripSubnetMask);
+			if (existingRouteEntry == null) {
+				// add this to the route table if we are getting new information
+				this.routeTable.insert(ripDestinationIpAddress, gatewayIpAddress, ripSubnetMask, inIface, (ripMetric + 1), System.currentTimeMillis());
+				System.out.println("We just inserted in a new entry in the route table from the RIP response");
+			} else {
+				// compare to see if the route information from the RIP packet gives us a better route
+				if ((ripMetric + 1) < existingRouteEntry.getMetric()) {
+					existingRouteEntry.setGatewayAddress(gatewayIpAddress);
+					existingRouteEntry.setInterface(inIface);
+					existingRouteEntry.setMetric(ripMetric + 1);
+					existingRouteEntry.setLastUpdateTimestamp(System.currentTimeMillis());
+				}
+			}
 		}
 	}
 
-	private void sendRipResponse(Ethernet ethernetPacket, Iface inIface) {
+	/**
+	* Router uses this method to send a response back for an individual solicited RIP request. 
+	* Destination IP address = IP address of router interface that sent request
+	* Destination MAC address = MAC address of router interface that sent request
+	* @param receivedEthernetPacket contains the RIP request
+	* @param inIface the interface on the router that the packet came in on
+	 */
+	private void sendRipResponse(Ethernet receivedEthernetPacket, Iface inIface) {
+		MACAddress destinationMacAddress = receivedEthernetPacket.getSourceMAC();
+		int destinationIpAddress = 0;
+		for (ArpEntry arpEntry : this.arpCache.getEntries().values()) {
+			if (arpEntry.getMac() == destinationMacAddress) {
+				destinationIpAddress = arpEntry.getIp();
+				break;
+			}
+		}
+		MACAddress sourceMacAddress = inIface.getMacAddress();
+		int sourceIpAddress = inIface.getIpAddress();
 
-	}
+		// build the RIPv2 packet using the router's current route table
+		for (RouteEntry routeEntry : this.getRouteTable().getEntries()) {
+			RIPv2 ripPacket = new RIPv2();
+			ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
+			for (RouteEntry r : this.getRouteTable().getEntries()) {
+				RIPv2Entry ripEntry = new RIPv2Entry(r.getDestinationAddress(), r.getMaskAddress(), r.getMetric()); // need to construct this properly
+				ripPacket.addEntry(ripEntry);
+			}
+			ripPacket.resetChecksum();
 
-	private void sendRipRequest(IPv4 ipPacket, Iface inIface) {
-		RIPv2 ripPacket = (RIPv2) ipPacket.getPayload();
+			UDP udpPacket = new UDP();
+			udpPacket.resetChecksum();
+
+			IPv4 ipPacket = new IPv4();
+			ipPacket.setSourceAddress(sourceIpAddress);
+			ipPacket.setDestinationAddress(destinationIpAddress);
+			ipPacket.resetChecksum();
+
+			Ethernet ethernetPacket = new Ethernet();
+			ethernetPacket.setSourceMACAddress(sourceMacAddress.toString());
+			ethernetPacket.setDestinationMACAddress(destinationMacAddress.toString());
+
+			udpPacket.setPayload(ripPacket);
+			ipPacket.setPayload(udpPacket);
+			ethernetPacket.setPayload(ipPacket);
+			sendPacket(ethernetPacket,routeEntry.getInterface());
+		}
 	}
-	
 
 	private void handleIpPacket(Ethernet etherPacket, Iface inIface)
 	{

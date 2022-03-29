@@ -1,10 +1,14 @@
 package edu.wisc.cs.sdn.vnet;
 
 import edu.wisc.cs.sdn.vnet.rt.Router;
+import edu.wisc.cs.sdn.vnet.rt.RouteEntry;
 import edu.wisc.cs.sdn.vnet.sw.Switch;
 import edu.wisc.cs.sdn.vnet.vns.Command;
 import edu.wisc.cs.sdn.vnet.vns.VNSComm;
 import edu.wisc.cs.sdn.vnet.rt.RouteTable;
+import java.util.Timer;
+import java.util.TimerTask;
+import net.floodlightcontroller.packet.*;
 
 public class Main 
 {
@@ -92,10 +96,11 @@ public class Main
 			if (routeTableFile != null)
 			{ ((Router)dev).loadRouteTable(routeTableFile); }
             else {
-                // Starting RIP: implement RIP since not using a static route table
+                // Starting RIP: implement RIP since not using a static route table.
+				// Add to route table things that are directly connected to this router.
                 RouteTable routeTable = ((Router) dev).getRouteTable();
                 for (Iface i : dev.getInterfaces().values()) {
-                    routeTable.insert((i.getIpAddress() & i.getSubnetMask()), 0, i.getSubnetMask(), i);
+                    routeTable.insert((i.getIpAddress() & i.getSubnetMask()), 0, i.getSubnetMask(), i, 1, System.currentTimeMillis());
                 }
                 System.out.println(routeTable);
             }
@@ -107,25 +112,54 @@ public class Main
 
 		// Read messages from the server until the server closes the connection
 		System.out.println("<-- Ready to process packets -->");
+		//while (vnsComm.readFromServer());
 		while (vnsComm.readFromServer()) {
 			if (routeTableFile == null) {
-				// send unsolicited RIP responses every 10 seconds
-				Timer timer = new Timer();
-				timer.schedule(new TimerTask() {
-					@Override
-					public void run() {
-						for (RouteEntry routeEntry : dev.getRouteTable()) {
-							RIPv2 ripPacket = new RIPv2();
-							ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
-							for (RouteEntry r : dev.getRouteTable()) {
-								RIPv2Entry ripEntry = new RIPv2Entry();
-							}
-							dev.sendPacket(routeEntry.getInterface())
-						}
+
+				// implement 30 second timeout for entries in route table learned from RIP
+				for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
+					if (routeEntry.getGatewayAddress() == 0) {
+						// we don't want to remove entries for devices directly connected to this router
+						continue;
 					}
-				}, 0, 10000);			
+					if ((routeEntry.getLastUpdateTimestamp() + 30000) < System.currentTimeMillis()) {
+						((Router) dev).getRouteTable().remove(routeEntry.getDestinationAddress(), routeEntry.getMaskAddress());
+					}
+				}
+
+				// send unsolicited RIP responses every 10 seconds
+				if ((System.currentTimeMillis() - ((Router) dev).getLastSent()) > 10000) {
+					for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
+						RIPv2 ripPacket = new RIPv2();
+						ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
+						for (RouteEntry r : ((Router) dev).getRouteTable().getEntries()) {
+							RIPv2Entry ripEntry = new RIPv2Entry(r.getDestinationAddress(), r.getMaskAddress(), r.getMetric()); // need to construct this properly
+							ripPacket.addEntry(ripEntry);
+						}
+						ripPacket.resetChecksum();
+
+						UDP udpPacket = new UDP();
+						udpPacket.resetChecksum();
+
+						IPv4 ipPacket = new IPv4();
+						ipPacket.setSourceAddress(routeEntry.getInterface().getIpAddress());
+						ipPacket.setDestinationAddress("224.0.0.9");
+
+
+						Ethernet ethernetPacket = new Ethernet();
+						ethernetPacket.setSourceMACAddress(routeEntry.getInterface().getMacAddress().toString());
+						ethernetPacket.setDestinationMACAddress("11:11:11:11:11:11");
+
+						udpPacket.setPayload(ripPacket);
+						ipPacket.setPayload(udpPacket);
+						ethernetPacket.setPayload(ipPacket);
+						dev.sendPacket(ethernetPacket,routeEntry.getInterface());
+						((Router) dev).setLastSent(System.currentTimeMillis());
+						System.out.print(((Router) dev).getRouteTable().toString());
+					}
+				}		
 			}
-		}
+		} 
 		
 		// Shutdown the router
 		dev.destroy();
