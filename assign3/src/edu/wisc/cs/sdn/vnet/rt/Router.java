@@ -106,26 +106,22 @@ public class Router extends Device
 		/********************************************************************/
 		/* TODO: Handle packets                                             */
 
-		System.out.println("The type of the packet is " + etherPacket.getEtherType());
 		switch(etherPacket.getEtherType())
 		{
 		case Ethernet.TYPE_IPv4:
 			// check if receiving RIP request
 			IPv4 ipPacket = (IPv4) etherPacket.getPayload();
-			
-			System.out.println("Checking if received RIP request.");
 			if (ipPacket.getProtocol() == IPv4.PROTOCOL_UDP) {
 				UDP udpPacket = (UDP) ipPacket.getPayload();
 				if (udpPacket.getDestinationPort() == UDP.RIP_PORT) {
-					System.out.println("Router has received a RIP Packet.");
 					RIPv2 ripPacket = (RIPv2) udpPacket.getPayload();
 					if (ripPacket.getCommand() == RIPv2.COMMAND_REQUEST) {
-						System.out.println("Sending a RIP Response.");
 						sendRipResponse(etherPacket, inIface);
 					} else {
-						System.out.println("Processing a RIP Response.");
 						processRipResponse(etherPacket, inIface);
 					}
+				} else {
+					this.handleIpPacket(etherPacket, inIface);
 				}
 			} else {
 				this.handleIpPacket(etherPacket, inIface);
@@ -149,32 +145,23 @@ public class Router extends Device
 		RIPv2 receivedRipPacket = (RIPv2) receivedUdpPacket.getPayload();
 
 		for (RIPv2Entry ripEntry : receivedRipPacket.getEntries()) {
-			// System.out.println("Looping through RIP Entries in packet");
 			int ripDestinationIpAddress = ripEntry.getAddress();
 			int ripSubnetMask = ripEntry.getSubnetMask();
 			int ripMetric = ripEntry.getMetric();
-			// System.out.println("rip address = " + ripDestinationIpAddress);
-			// System.out.println("rip subnet mask = " + ripSubnetMask);
-			// System.out.println("rip metric = " + ripMetric);
 
 			MACAddress gatewayMacAddress = receivedEthernetPacket.getSourceMAC();
 			int gatewayIpAddress = 0;
 			for (ArpEntry arpEntry : this.arpCache.getEntries().values()) {
-				// System.out.println("ARP MAC = " + arpEntry.getMac().toString());
-				// System.out.println("Gateway MAC = " + gatewayMacAddress);
 				if (arpEntry.getMac().equals(gatewayMacAddress)) {
 					gatewayIpAddress = arpEntry.getIp();
-					// System.out.println("We found a gateway address.");
 					break;
 				}
 			}
 
 			RouteEntry existingRouteEntry = this.routeTable.find(ripDestinationIpAddress, ripSubnetMask);
-			System.out.println("Existing Route Entry = " + existingRouteEntry);
 			if (existingRouteEntry == null) {
 				// add this to the route table if we are getting new information
 				this.routeTable.insert(ripDestinationIpAddress, gatewayIpAddress, ripSubnetMask, inIface, (ripMetric + 1), System.currentTimeMillis());
-				System.out.println("We just inserted in a new entry in the route table from the RIP response");
 			} else {
 				// compare to see if the route information from the RIP packet gives us a better route
 				if ((ripMetric + 1) < existingRouteEntry.getMetric()) {
@@ -182,19 +169,15 @@ public class Router extends Device
 					existingRouteEntry.setInterface(inIface);
 					existingRouteEntry.setMetric(ripMetric + 1);
 					existingRouteEntry.setLastUpdateTimestamp(System.currentTimeMillis());
-					System.out.println(this.routeTable.toString());
 				} else if (existingRouteEntry.getGatewayAddress() == receivedIpPacket.getSourceAddress()) {
 					if (existingRouteEntry.getMetric() <= 16) {
 						existingRouteEntry.setMetric(ripMetric + 1);
 					}
 					existingRouteEntry.setLastUpdateTimestamp(System.currentTimeMillis());
-					System.out.println("The path through same router got longer, so have to take this update.");
 				} else {
 					existingRouteEntry.setLastUpdateTimestamp(System.currentTimeMillis());
-					System.out.println("RIP metric is not as good as our current so ignore this.");
 				}
 			}
-			System.out.println(this.routeTable.toString());
 		}
 	}
 
@@ -206,7 +189,6 @@ public class Router extends Device
 	* @param inIface the interface on the router that the packet came in on
 	 */
 	private void sendRipResponse(Ethernet receivedEthernetPacket, Iface inIface) {
-		System.out.println("Sending a RIP response.");
 		MACAddress destinationMacAddress = receivedEthernetPacket.getSourceMAC();
 		int destinationIpAddress = 0;
 		for (ArpEntry arpEntry : this.arpCache.getEntries().values()) {
@@ -220,7 +202,6 @@ public class Router extends Device
 
 		// build the RIPv2 packet using the router's current route table
 		for (RouteEntry routeEntry : this.getRouteTable().getEntries()) {
-			System.out.println("Adding a RIP entry to the RIP Packet");
 			RIPv2 ripPacket = new RIPv2();
 			ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
 			for (RouteEntry r : this.getRouteTable().getEntries()) {
@@ -248,20 +229,17 @@ public class Router extends Device
 			ipPacket.setPayload(udpPacket);
 			ethernetPacket.setPayload(ipPacket);
 			sendPacket(ethernetPacket,routeEntry.getInterface());
-			System.out.println("Just sent a RIP Packet.");
 		}
 	}
 
 	private void handleIpPacket(Ethernet etherPacket, Iface inIface)
 	{
-		System.out.println("Do we get here?");
 		// Make sure it's an IP packet
 		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4)
 		{ return; }
 
 		// Get IP header
 		IPv4 ipPacket = (IPv4)etherPacket.getPayload();
-		System.out.println("Handle IP packet");
 
 		// Verify checksum
 		short origCksum = ipPacket.getChecksum();
@@ -273,7 +251,6 @@ public class Router extends Device
 		{ return; }
 
 		// Check TTL
-		System.out.println("The packet's TTL is " + ipPacket.getTtl());
 		ipPacket.setTtl((byte)(ipPacket.getTtl()-1));
 		if (0 == ipPacket.getTtl())
 		{ 
@@ -306,7 +283,6 @@ public class Router extends Device
 		// Make sure it's an IP packet
 		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4)
 		{ return; }
-		System.out.println("Forward IP packet");
 
 		// Get IP header
 		IPv4 ipPacket = (IPv4)etherPacket.getPayload();
@@ -394,7 +370,6 @@ public class Router extends Device
 		}
         
 		// send the new Ethernet packet to the proper destination
-        System.out.println("Now we're calling the sendPacket method for the Ethernet packet we created for the ICMP message.");
         this.sendPacket(ethernetNewPacket, inIface);
         return;
     }
@@ -424,20 +399,16 @@ public class Router extends Device
 			// copying the whole payload of the original IP Packet (echo reply)
 			byte[] originalIpPacketContent = originalIpPacket.serialize();
     		byte ipOriginalPacketHeaderLength = originalIpPacket.getHeaderLength();   // convert from 4 byte words to bytes
-			System.out.println("Header length in bytes = " +(4 * ipOriginalPacketHeaderLength));
 			int arraySize = (4 * ipOriginalPacketHeaderLength) + 4 + originalIpPacketContent.length; // 4 byes of padding and the 8 bytes of the original IP Packet
         	byte[] newPayload = new byte[arraySize];
-			System.out.println("new payload array size = " + arraySize);
         	System.arraycopy(originalIpPacketContent, 0, newPayload, 4, newPayload.length - 4);
 			return newPayload;
 		} else {
 			// copying only a specific number of bytes from the payload	
 			byte[] originalIpPacketContent = originalIpPacket.serialize();
     		byte ipOriginalPacketHeaderLength = originalIpPacket.getHeaderLength();   // convert from 4 byte words to bytes
-			System.out.println("Header length in bytes = " +(4 * ipOriginalPacketHeaderLength));
 			int arraySize = (4 * ipOriginalPacketHeaderLength) + 4 + bytesToCopy; // 4 byes of padding and the 8 bytes of the original IP Packet
         	byte[] newPayload = new byte[arraySize];
-			System.out.println("new payload array size = " + arraySize);
         	System.arraycopy(originalIpPacketContent, 0, newPayload, 4, newPayload.length - 4);
 			return newPayload;
 		}
@@ -452,17 +423,13 @@ public class Router extends Device
 	* @param inIface which interface on the router the Ethernet packet came in
 	 */
 	private Ethernet constructEthernetHeader(Ethernet originalEthernetPacket, Iface inIface) {
-		System.out.println("The received ethernet packet's Source MAC is: " + originalEthernetPacket.getSourceMAC().toString());
-        System.out.println("The received ethernet packet's Destination MAC is: " + originalEthernetPacket.getDestinationMAC().toString());
         Ethernet ethernetNewPacket = new Ethernet();
         IPv4 ipOriginalPacket = (IPv4)originalEthernetPacket.getPayload();
         // set up type
         ethernetNewPacket.setEtherType(Ethernet.TYPE_IPv4);
 
         // set the source MAC (the router's interface)
-        System.out.println("We received the packet on interface: "+inIface.toString());
         MACAddress sourceMac = inIface.getMacAddress();
-        System.out.println("So the ICMP Ethernet Packet's Source MAC Address should be: " + sourceMac.toString());
         String sourceMacString = sourceMac.toString();
         ethernetNewPacket.setSourceMACAddress(sourceMacString);
 
@@ -470,22 +437,13 @@ public class Router extends Device
 
         // 1. look up the source IP address from the original IP Packet in the route table
         RouteEntry routeEntry = this.routeTable.lookup(ipOriginalPacket.getSourceAddress());
-        if (routeEntry == null) {
-            System.out.println("The route entry was null.");
-        } else {
-                System.out.println("Found Route Entry " + routeEntry.toString());
-        }
+
         // 2. Find the gateway in the RouteEntry
         int gatewayAddress = routeEntry.getGatewayAddress();
         if (gatewayAddress == 0) {
             // 3. If the gateway is 0, just look up the source IP address from original IP packet in ARP cache 
             // and set destination MAC to corresponding MAC
             ArpEntry arpEntry = this.arpCache.lookup(ipOriginalPacket.getSourceAddress());
-            if (arpEntry == null) {
-                System.out.println("The ARP Entry was null.");
-            } else {
-                System.out.println("Found ARP Entry " + arpEntry.toString());
-            }
             MACAddress destinationMacAddress = arpEntry.getMac();
             String arpEntryMacAddrString = destinationMacAddress.toString();
             ethernetNewPacket.setDestinationMACAddress(arpEntryMacAddrString);
@@ -493,17 +451,10 @@ public class Router extends Device
             // If gateway is not 0, look up the gateway IP address (gateway = the next router) in the ARP cache
             // and set destination MAC to the corresponding MAC
             ArpEntry arpEntry = this.arpCache.lookup(gatewayAddress);
-            if (arpEntry == null) {
-                System.out.println("The ARP Entry was null.");
-            } else {
-                System.out.println("Found ARP Entry " + arpEntry.toString());
-            }
             MACAddress destinationMacAddress = arpEntry.getMac();
             String arpEntryMacAddrString = destinationMacAddress.toString();
             ethernetNewPacket.setDestinationMACAddress(arpEntryMacAddrString);
-        }      
-        System.out.println("We set the ICMP Ethernet Packet's Destination MAC Address to: " + ethernetNewPacket.getDestinationMAC().toString());
-		
+        }      		
 		return ethernetNewPacket;
 	}
 
@@ -528,9 +479,7 @@ public class Router extends Device
 			// set source IP on new packet as the IP address of the interface that the original packet arrived on.
 			ipNewPacket.setSourceAddress(inIface.getIpAddress());
 		}
-		System.out.println("We set the ICMP IP Packet's Source IP Address to: " + ipNewPacket.fromIPv4Address(ipNewPacket.getSourceAddress()));
 		ipNewPacket.setDestinationAddress(originalIpPacket.getSourceAddress());
-        System.out.println("We set the ICMP IP Packet's Destination IP Address to: " + ipNewPacket.fromIPv4Address(ipNewPacket.getDestinationAddress()));
         ipNewPacket.resetChecksum();
 		return ipNewPacket;
 	}

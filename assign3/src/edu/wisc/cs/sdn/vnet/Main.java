@@ -93,70 +93,20 @@ public class Main
 		if (dev instanceof Router) 
 		{
 			// Read static route table
-			if (routeTableFile != null)
-			{ ((Router)dev).loadRouteTable(routeTableFile); }
-            else {
+			if (routeTableFile != null) { 
+				((Router)dev).loadRouteTable(routeTableFile); 
+			} else {
                 // Starting RIP: implement RIP since not using a static route table.
 				// Add to route table things that are directly connected to this router.
                 RouteTable routeTable = ((Router) dev).getRouteTable();
                 for (Iface i : dev.getInterfaces().values()) {
                     routeTable.insert((i.getIpAddress() & i.getSubnetMask()), 0, i.getSubnetMask(), i, 1, System.currentTimeMillis());
                 }
-				System.out.println("Built initial route table");
-                System.out.println(routeTable);
-            }
-			
-			// Read static ACP cache
-			if (arpCacheFile != null)
-			{ ((Router)dev).loadArpCache(arpCacheFile); }
-		}
 
-		// Read messages from the server until the server closes the connection
-		System.out.println("<-- Ready to process packets -->");
-		//while (vnsComm.readFromServer());
-		while (vnsComm.readFromServer()) {
-			if (routeTableFile == null) {
-
-				// implement 30 second timeout for entries in route table learned from RIP
-				int numberOfRouteEntries = ((Router) dev).getRouteTable().getEntries().size();
-				for (int i = (numberOfRouteEntries - 1); i >= 0; i--) {
-					RouteEntry routeEntry = ((Router) dev).getRouteTable().getEntries().get(i);
-					if (routeEntry.getGatewayAddress() == 0) {
-						System.out.println("Don't remove this entry because it's directly connected to router.");
-						// we don't want to remove entries for devices directly connected to this router
-						continue;
-					}
-					if ((routeEntry.getLastUpdateTimestamp() + 30000) < System.currentTimeMillis()) {
-						System.out.println("Entry is being removed due to 30 second timeout.");
-						((Router) dev).getRouteTable().remove(routeEntry.getDestinationAddress(), routeEntry.getMaskAddress());
-					}
-				}
-/* 				for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
-					if (routeEntry.getGatewayAddress() == 0) {
-						System.out.println("Don't remove this entry because it's directly connected to router.");
-						// we don't want to remove entries for devices directly connected to this router
-						continue;
-					}
-					if ((routeEntry.getLastUpdateTimestamp() + 30000) < System.currentTimeMillis()) {
-						System.out.println("Entry is being removed due to 30 second timeout.");
-						((Router) dev).getRouteTable().remove(routeEntry.getDestinationAddress(), routeEntry.getMaskAddress());
-					}
-				} */
-
-				// send unsolicited RIP responses every 10 seconds
-				System.out.println("Current time = " + System.currentTimeMillis());
-				System.out.println("Router last sent response time = " + ((Router) dev).getLastSent());
-				if ((System.currentTimeMillis() - ((Router) dev).getLastSent()) > 10000) {
-					System.out.println("Sending an unsolicited RIP response.");
-					for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
-						RIPv2 ripPacket = new RIPv2();
-						ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
-						for (RouteEntry r : ((Router) dev).getRouteTable().getEntries()) {
-							RIPv2Entry ripEntry = new RIPv2Entry(r.getDestinationAddress(), r.getMaskAddress(), r.getMetric()); // need to construct this properly
-							ripPacket.addEntry(ripEntry);
-							System.out.println("Added " + ripEntry.toString());
-						}
-						System.out.println("Constructed: " + ripPacket.toString());
+				// send out initial RIP requests out of each interface on the router
+				for (Iface i : dev.getInterfaces().values()) {
+                    RIPv2 ripPacket = new RIPv2();
+						ripPacket.setCommand(RIPv2.COMMAND_REQUEST);
 						ripPacket.resetChecksum();
 
 						UDP udpPacket = new UDP();
@@ -165,25 +115,86 @@ public class Main
 						udpPacket.resetChecksum();
 
 						IPv4 ipPacket = new IPv4();
-						ipPacket.setSourceAddress(routeEntry.getInterface().getIpAddress());
+						ipPacket.setSourceAddress(i.getIpAddress());
 						ipPacket.setDestinationAddress("224.0.0.9");
 
 
 						Ethernet ethernetPacket = new Ethernet();
 						ethernetPacket.setEtherType(Ethernet.TYPE_IPv4);
-						ethernetPacket.setSourceMACAddress(routeEntry.getInterface().getMacAddress().toString());
+						ethernetPacket.setSourceMACAddress(i.getMacAddress().toString());
 						ethernetPacket.setDestinationMACAddress("FF:FF:FF:FF:FF:FF");
 
 						udpPacket.setPayload(ripPacket);
 						ipPacket.setPayload(udpPacket);
 						ethernetPacket.setPayload(ipPacket);
-						dev.sendPacket(ethernetPacket,routeEntry.getInterface());
-						((Router) dev).setLastSent(System.currentTimeMillis());
-						System.out.print(((Router) dev).getRouteTable().toString());
+						dev.sendPacket(ethernetPacket, i);
+                }
+            }
+
+			
+			// Read static ACP cache
+			if (arpCacheFile != null)
+			{ ((Router)dev).loadArpCache(arpCacheFile); }
+		}
+
+		// Read messages from the server until the server closes the connection
+		System.out.println("<-- Ready to process packets -->");
+		if (routeTableFile != null) {
+			// not running in RIP, avoid printing all the RIP stuff out
+			while (vnsComm.readFromServer());
+		} else {
+			while (vnsComm.readFromServer()) {
+				if (routeTableFile == null) {
+	
+					// implement 30 second timeout for entries in route table learned from RIP
+					int numberOfRouteEntries = ((Router) dev).getRouteTable().getEntries().size();
+					for (int i = (numberOfRouteEntries - 1); i >= 0; i--) {
+						RouteEntry routeEntry = ((Router) dev).getRouteTable().getEntries().get(i);
+						if (routeEntry.getGatewayAddress() == 0) {
+							// we don't want to remove entries for devices directly connected to this router
+							continue;
+						}
+						if ((routeEntry.getLastUpdateTimestamp() + 30000) < System.currentTimeMillis()) {
+							((Router) dev).getRouteTable().remove(routeEntry.getDestinationAddress(), routeEntry.getMaskAddress());
+						}
 					}
-				}		
-			}
-		} 
+	
+					// send unsolicited RIP responses every 10 seconds
+					if ((System.currentTimeMillis() - ((Router) dev).getLastSent()) > 10000) {
+						for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
+							RIPv2 ripPacket = new RIPv2();
+							ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
+							for (RouteEntry r : ((Router) dev).getRouteTable().getEntries()) {
+								RIPv2Entry ripEntry = new RIPv2Entry(r.getDestinationAddress(), r.getMaskAddress(), r.getMetric()); // need to construct this properly
+								ripPacket.addEntry(ripEntry);
+							}
+							ripPacket.resetChecksum();
+	
+							UDP udpPacket = new UDP();
+							udpPacket.setSourcePort(UDP.RIP_PORT);
+							udpPacket.setDestinationPort(UDP.RIP_PORT);
+							udpPacket.resetChecksum();
+	
+							IPv4 ipPacket = new IPv4();
+							ipPacket.setSourceAddress(routeEntry.getInterface().getIpAddress());
+							ipPacket.setDestinationAddress("224.0.0.9");
+	
+	
+							Ethernet ethernetPacket = new Ethernet();
+							ethernetPacket.setEtherType(Ethernet.TYPE_IPv4);
+							ethernetPacket.setSourceMACAddress(routeEntry.getInterface().getMacAddress().toString());
+							ethernetPacket.setDestinationMACAddress("FF:FF:FF:FF:FF:FF");
+	
+							udpPacket.setPayload(ripPacket);
+							ipPacket.setPayload(udpPacket);
+							ethernetPacket.setPayload(ipPacket);
+							dev.sendPacket(ethernetPacket,routeEntry.getInterface());
+							((Router) dev).setLastSent(System.currentTimeMillis());
+						}
+					}		
+				}
+			} 
+		}
 		
 		// Shutdown the router
 		dev.destroy();
