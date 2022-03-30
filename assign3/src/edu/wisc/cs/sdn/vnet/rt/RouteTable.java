@@ -147,7 +147,7 @@ public class RouteTable
 			}
 
 			// Add an entry to the route table
-			this.insert(dstIp, gwIp, maskIp, iface, 16, System.currentTimeMillis());
+			this.insert(dstIp, gwIp, maskIp, iface, 1, System.currentTimeMillis());
 		}
 
 		// Close the file
