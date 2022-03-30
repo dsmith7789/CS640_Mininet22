@@ -45,7 +45,7 @@ public class RouteEntry
 		this.gatewayAddress = gatewayAddress;
 		this.maskAddress = maskAddress;
 		this.iface = iface;
-		this.metric = 16;	// set to "infinite distance" to start, update later if it's reachable
+		this.metric = metric;
 		this.lastUpdateTimestamp = System.currentTimeMillis();
 	}
 	

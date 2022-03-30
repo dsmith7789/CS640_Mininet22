@@ -102,6 +102,7 @@ public class Main
                 for (Iface i : dev.getInterfaces().values()) {
                     routeTable.insert((i.getIpAddress() & i.getSubnetMask()), 0, i.getSubnetMask(), i, 1, System.currentTimeMillis());
                 }
+				System.out.println("Built initial route table");
                 System.out.println(routeTable);
             }
 			
@@ -117,28 +118,50 @@ public class Main
 			if (routeTableFile == null) {
 
 				// implement 30 second timeout for entries in route table learned from RIP
-				for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
+				int numberOfRouteEntries = ((Router) dev).getRouteTable().getEntries().size();
+				for (int i = (numberOfRouteEntries - 1); i >= 0; i--) {
+					RouteEntry routeEntry = ((Router) dev).getRouteTable().getEntries().get(i);
 					if (routeEntry.getGatewayAddress() == 0) {
+						System.out.println("Don't remove this entry because it's directly connected to router.");
 						// we don't want to remove entries for devices directly connected to this router
 						continue;
 					}
 					if ((routeEntry.getLastUpdateTimestamp() + 30000) < System.currentTimeMillis()) {
+						System.out.println("Entry is being removed due to 30 second timeout.");
 						((Router) dev).getRouteTable().remove(routeEntry.getDestinationAddress(), routeEntry.getMaskAddress());
 					}
 				}
+/* 				for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
+					if (routeEntry.getGatewayAddress() == 0) {
+						System.out.println("Don't remove this entry because it's directly connected to router.");
+						// we don't want to remove entries for devices directly connected to this router
+						continue;
+					}
+					if ((routeEntry.getLastUpdateTimestamp() + 30000) < System.currentTimeMillis()) {
+						System.out.println("Entry is being removed due to 30 second timeout.");
+						((Router) dev).getRouteTable().remove(routeEntry.getDestinationAddress(), routeEntry.getMaskAddress());
+					}
+				} */
 
 				// send unsolicited RIP responses every 10 seconds
+				System.out.println("Current time = " + System.currentTimeMillis());
+				System.out.println("Router last sent response time = " + ((Router) dev).getLastSent());
 				if ((System.currentTimeMillis() - ((Router) dev).getLastSent()) > 10000) {
+					System.out.println("Sending an unsolicited RIP response.");
 					for (RouteEntry routeEntry : ((Router) dev).getRouteTable().getEntries()) {
 						RIPv2 ripPacket = new RIPv2();
 						ripPacket.setCommand(RIPv2.COMMAND_RESPONSE);
 						for (RouteEntry r : ((Router) dev).getRouteTable().getEntries()) {
 							RIPv2Entry ripEntry = new RIPv2Entry(r.getDestinationAddress(), r.getMaskAddress(), r.getMetric()); // need to construct this properly
 							ripPacket.addEntry(ripEntry);
+							System.out.println("Added " + ripEntry.toString());
 						}
+						System.out.println("Constructed: " + ripPacket.toString());
 						ripPacket.resetChecksum();
 
 						UDP udpPacket = new UDP();
+						udpPacket.setSourcePort(UDP.RIP_PORT);
+						udpPacket.setDestinationPort(UDP.RIP_PORT);
 						udpPacket.resetChecksum();
 
 						IPv4 ipPacket = new IPv4();
@@ -147,8 +170,9 @@ public class Main
 
 
 						Ethernet ethernetPacket = new Ethernet();
+						ethernetPacket.setEtherType(Ethernet.TYPE_IPv4);
 						ethernetPacket.setSourceMACAddress(routeEntry.getInterface().getMacAddress().toString());
-						ethernetPacket.setDestinationMACAddress("11:11:11:11:11:11");
+						ethernetPacket.setDestinationMACAddress("FF:FF:FF:FF:FF:FF");
 
 						udpPacket.setPayload(ripPacket);
 						ipPacket.setPayload(udpPacket);
