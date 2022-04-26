@@ -1,5 +1,7 @@
+import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.SocketTimeoutException;
 
 public class TCPend {
     
@@ -45,7 +47,7 @@ public class TCPend {
      * Sender side of 3 way handshake
      * @param sender
      */
-    public void senderEstablishConnection(Sender sender) {
+    public static void senderEstablishConnection(Sender sender) {
         // put a SYN packet together and send it to the receiver
         TCPSegment synPacket = new TCPSegment();
         synPacket.setFlags(4);
@@ -78,7 +80,7 @@ public class TCPend {
      * Receiver side of 3 way handshake
      * @param receiver
      */
-    public void receiverEstablishConnection(Receiver receiver) {
+    public static void receiverEstablishConnection(Receiver receiver) {
         // read the SYN packet from the sender
         boolean receivedSyn= false;
         while (receivedSyn == false) {
@@ -107,7 +109,7 @@ public class TCPend {
      * Sender side of 3 way termination
      * @param sender
      */
-    public void senderTerminateConnection(Sender sender) {
+    public static void senderTerminateConnection(Sender sender) {
         // put a FIN packet together and send it to the receiver
         TCPSegment finPacket = new TCPSegment();
         finPacket.setSequenceNumber(sender.getSequenceNumber());
@@ -144,7 +146,7 @@ public class TCPend {
      * Receiver side of 3 way termination
      * @param receiver
      */
-    public void receiverTerminateConnection(Receiver receiver) {
+    public static void receiverTerminateConnection(Receiver receiver) {
         // read the FIN packet from the sender
         boolean receivedFin = false;
         while (receivedFin == false) {
@@ -153,7 +155,7 @@ public class TCPend {
             DatagramPacket potentialFinPacket = new DatagramPacket(payload, receiver.mtu);
             receiver.getSocket().receive(potentialFinPacket);
             byte[] buffer = potentialFinPacket.getData();
-            TCPSegment receivedSegment = new TCPSegment(buffer, 0, buffer.length);
+            TCPSegment receivedSegment = new TCPSegment(buffer);
             int flags = receivedSegment.getFlags();
             if ((flags & 0x3) != 0x3) {
                 continue;   // wasn't a SYN, so need to keep waiting
@@ -172,4 +174,145 @@ public class TCPend {
         receiver.getSocket().send(finAckPacket.serialize());
 
     }
+
+    /**
+     * Sender portion of the data transfer phase
+     * @param sender
+     */
+    public static void senderDataTransfer(Sender sender) {
+        while (sender.getSequenceNumber() < (int) sender.getFile().length()) {
+            // fill buffer
+            while (sender.getBuffer().size() < sender.sws) {
+                TCPSegment sendSegment = sender.gatherData(sender.getSequenceNumber());
+                sender.sendPacket(sendSegment);
+                sender.setSequenceNumber(sender.getSequenceNumber() + sender.mtu);
+            }
+            TCPSegment ackSegment = senderReceiveMethod(sender);
+            
+            if (ackSegment.equals(null)) {
+                System.out.println("Connection lost error. Quitting.");
+                System.exit(1);
+            }
+            int ack = ackSegment.getAcknowledgementNumber();
+
+            if (ack == sender.getLastReceivedAckNumber()) {
+                sender.setLastReceivedAckNumber(sender.getLastReceivedAckNumber() + 1);
+                sender.setTotalDuplicateAcknowledgements(sender.getTotalDuplicateAcknowledgements() + 1);
+                if (sender.getLastReceivedAckOccurrences() > 2) {
+                    sender.getBuffer().clear();
+                    sender.setSequenceNumber(sender.getLastReceivedAckNumber());
+                }
+            } else if (ack > sender.getLastReceivedAckNumber()) {
+                sender.setLastReceivedAckNumber(ack);
+                sender.setLastReceivedAckOccurrences(0);
+                // drop all  the packets from the buffer that we can
+                for (TCPSegment segment : sender.getBuffer()) {
+                    if (segment.getSequenceNumber() < ack) {
+                        sender.getBuffer().remove(segment);
+                    }
+                }
+                sender.calculateTimeout(ackSegment);
+            }
+        }
+    }
+
+    /**
+     * Handles waiting for ACKs to come back in from the receiver
+     * @param sender
+     * @return -1 if we retransmitted 16 times without getting an ACK back (error), otherwise returns the ACK
+     */
+    public static TCPSegment senderReceiveMethod(Sender sender) {
+        int attempts = 0;
+        while (attempts < 16) {
+            try {
+                byte[] buffer = new byte[sender.mtu];
+                DatagramPacket packet = new DatagramPacket(buffer, sender.mtu);
+                sender.getSocket().receive(packet);
+                byte[] segmentData = packet.getData();
+                TCPSegment segment = new TCPSegment(segmentData);
+                return segment;
+            } catch (SocketTimeoutException e) {
+                System.out.println("Retransmitting packets.");
+                for (TCPSegment segment : sender.getBuffer()) {
+                    sender.sendPacket(segment);
+                }
+                attempts++;
+            } catch (IOException e) {
+                System.out.println("IO Exception");
+            }
+        }
+
+        return null;   
+    }
+
+    /**
+     * The receiver side of the data transfer phase
+     * @throws IOException
+     */
+    public static void receiverDataTransfer(Receiver receiver) throws IOException {
+        boolean finReceived = false;
+        while (finReceived == false) {
+            DatagramPacket receivedPacket = receiverReceiveMethod(receiver);
+            byte[] packetData = receivedPacket.getData();
+            TCPSegment receivedSegment = new TCPSegment(packetData);
+
+            if (receivedPacket.equals(null)) {
+                System.out.println("This shouldn't happen. Quitting.");
+                System.exit(1);
+            }
+            int seq = receivedSegment.getSequenceNumber();
+            // check if we already have in buffer, then add to buffer
+            boolean alreadyInBuffer = false;
+            for (TCPSegment segment : receiver.getBuffer()) {
+                if (segment.getSequenceNumber() == seq) {
+                    alreadyInBuffer = true;
+                    break;
+                }
+            }
+            if (alreadyInBuffer == false) {
+                receiver.getBuffer().add(receivedSegment);
+            }
+
+            int bytesWritten = 0;
+            if (seq == receiver.getSequenceNumber()) {
+                // write everything we can to the file and remove from file
+                for (int i = (receiver.getBuffer().size() - 1); i >= 0; i--) {
+                    TCPSegment segment = receiver.getBuffer().get(i);
+                    if (segment.getSequenceNumber() <= seq) {
+                        receiver.writeData(segment);
+                        bytesWritten = bytesWritten + segment.getData().length;
+                        receiver.getBuffer().remove(i);
+                    }
+                }
+            } 
+            
+            TCPSegment ackPacket = new TCPSegment();
+            ackPacket.setAcknowledgementNumber(receiver.getSequenceNumber());
+            ackPacket.setTimestamp(receivedSegment.getTimestamp());
+            ackPacket.setFlags(1);
+            DatagramPacket datagramPacket = new DatagramPacket(ackPacket.serialize(), 0, receiver.mtu, receivedPacket.getAddress(), receivedPacket.getPort());
+            receiver.setSequenceNumber(receiver.getSequenceNumber() + bytesWritten + 1);
+            receiver.getSocket().send(datagramPacket);
+        }
+    }
+
+    /**
+     * Handles waiting for the 
+     * @param receiver
+     * @return
+     */
+    public static DatagramPacket receiverReceiveMethod(Receiver receiver) {
+        try {
+            byte[] buffer = new byte[receiver.mtu];
+            DatagramPacket packet = new DatagramPacket(buffer, receiver.mtu);
+            receiver.getSocket().receive(packet);
+            return packet;
+        } catch (SocketTimeoutException e) {
+            System.out.println("Timeout exception.");
+        } catch (IOException e) {
+            System.out.println("IO Exception");
+        }
+        return null;
+    }
+
 }

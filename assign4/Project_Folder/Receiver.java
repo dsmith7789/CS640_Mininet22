@@ -1,12 +1,14 @@
+import java.io.File;
 import java.io.FileOutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.util.ArrayList;
 
 public class Receiver {
 
     // variables we need to track that aren't supplied by the user
     private int sequenceNumber;
-    private HashMap<Integer, TCPSegment> buffer;
+    private ArrayList<TCPSegment> buffer;
     private int totalBytesOfDataReceived;
     private int totalPacketsReceived;
     private int totalOutOfSequencePacketsDiscarded;
@@ -82,6 +84,10 @@ public class Receiver {
         return this.socket;
     }
 
+    public ArrayList<TCPSegment> getBuffer() {
+        return this.buffer;
+    }
+
     // "SETTER" methods
 
     /**
@@ -150,6 +156,14 @@ public class Receiver {
         } else {
             sendAck(receivedSegment);
         }
+    }
+
+    /**
+     * Write data to the file on receiver
+     * @param segment
+     */
+    public void writeData(TCPSegment segment) {
+        //TODO
     }
 
     public void sendAck(TCPSegment packet) {
