@@ -1,7 +1,14 @@
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.SocketException;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.io.File;
 
 public class Sender {
 
@@ -13,7 +20,7 @@ public class Sender {
     private int totalRetransmissions;
     private int lastReceivedAckNumber;
     private int lastReceivedAckOccurrences;
-    private HashMap<Integer, TCPSegment> buffer;
+    private ArrayList<TCPSegment> buffer;
     private DatagramSocket socket;
     private long estRTT;
     private long estDev;
@@ -22,20 +29,29 @@ public class Sender {
 
     // variables the user provides
     protected int port;           // the port at which this sender will run
-    protected int remoteIP;       // IP address of the receiver
+    protected InetAddress remoteIP;       // IP address of the receiver
     protected int remotePort;     // port at which the remote receiver is running
     protected String filename;    // file we're sending
     protected int mtu;            // max trans unit (in bytes)
     protected int sws;            // sliding window size (number of segments)
 
     // constructor
-    public Sender(int port, int remoteIP, int remotePort, String filename, int mtu, int sws) {
+    public Sender(int port, String remoteIP, int remotePort, String filename, int mtu, int sws) {
         this.port = port;
-        this.remoteIP = remoteIP;
+        try {
+            this.remoteIP = InetAddress.getByName(remoteIP);
+        } catch (UnknownHostException e1) {
+            e1.printStackTrace();
+        }
         this.remotePort = remotePort;
         this.filename = filename;
         this.file = new File(this.filename);
+        try {
         this.fileInputStream = new FileInputStream(this.file);
+        } catch (FileNotFoundException e) {
+            System.out.println("Couldn't create file.");
+            System.exit(1);
+        }
         this.mtu = mtu;
         this.sws = sws;
     }
@@ -79,7 +95,7 @@ public class Sender {
      * @return the times we had to resend a packet while the connection was active
      */
     public int getTotalRetransmissions() {
-        return this.totalIncorrectChecksumPacketsDiscarded;
+        return this.totalRetransmissions;
     }
 
     /**
@@ -104,7 +120,7 @@ public class Sender {
      * acknowledgement. The buffer is also useful for tracking congestion.
      * @return the times we had to resend a packet while the connection was active
      */
-    public HashMap getBuffer() {
+    public ArrayList<TCPSegment> getBuffer() {
         return this.buffer;
     }
 
@@ -114,6 +130,10 @@ public class Sender {
      */
     public DatagramSocket getSocket() {
         return this.socket;
+    }
+
+    public File getFile() {
+        return this.file;
     }
 
 
@@ -152,7 +172,7 @@ public class Sender {
      * sets how many times we had to resend a packet while the connection was active.
      */
     public void setTotalRetransmissions(int newTotal) {
-        this.totalIncorrectChecksumPacketsDiscarded = newTotal;
+        this.totalRetransmissions = newTotal;
     }
 
     /**
@@ -166,7 +186,7 @@ public class Sender {
      * sets how many times we've received the current last ACK. If this exceeds 2, we can assume we lost a packet and 
      * need to retransmit it.
      */
-    public void LastReceivedAckOccurrences(int newOccurrences) {
+    public void setLastReceivedAckOccurrences(int newOccurrences) {
         this.lastReceivedAckOccurrences = newOccurrences;
     }
 
@@ -175,7 +195,7 @@ public class Sender {
      * acknowledgement. The buffer is also useful for tracking congestion.
      */
     public void setBuffer(HashMap<Integer, TCPSegment> newBuffer) {
-        this.totalIncorrectChecksumPacketsDiscarded = newBuffer;
+        this.buffer = newBuffer;
     }
 
     // OTHER Methods
@@ -201,65 +221,52 @@ public class Sender {
         return segment;
     }
 
+    /**
+     * Receives in TCPSegment
+     * Puts TCPSegment into a DatagramPacket
+     * Sends DatagramPacket over DatagramSocket
+     * @param packet the TCPSegment
+     */
     public void sendPacket(TCPSegment packet) {
-        // 1. Send the datagram packet
-        // 2. Add the packet to the buffer
-        // 3. Start the timeout
-        
-        while (packet.getRetrasmitAttempts() < 16) {
-            try {
-                this.socket.send(packet.serialize());
-                this.buffer.put(packet.getSequenceNumber(), packet);
-                packet.setRetransmitAttempts(packet.getRetrasmitAttempts() + 1);
-                boolean receivedAck = false;
-                while (receivedAck == false) {
-                    byte[] payload;
-                    DatagramPacket receivedPacket = new DatagramPacket(payload, sender.mtu);
-                    this.getSocket().receive(receivedPacket);
-                    byte[] buffer = receivedPacket.getData();
-                    TCPSegment receivedSegment = new TCPSegment(buffer, 0, buffer.length);
-                    int flags = receivedSegment.getFlags();
-                    int receivedAckNumber = receivedSegment.getAcknowledgementNumber();
-                    if ((flags & 0x1) != 0x1) {
-                        continue;   // wasn't an ACK, so need to keep waiting
-                    } else if (receivedAckNumber > packet.getSequenceNumber()) {
-                        receivedAck = true;
-                    }
-                }
-                if (receivedAck == true) {
-                    this.buffer.remove(packet.getSequenceNumber());
-                    break;
-                }
-            } catch (SocketTimeoutException e) {
-                System.out.println("Retransmitting packet.");
-            } 
+        DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), 0, this.mtu, this.remoteIP, this.remotePort);
+        try {
+            this.socket.send(datagramPacket);
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
         }
-        if (packet.getRetrasmitAttempts() == 16) {
-            System.out.println("Maximum number of retransmissions failure. Exiting program.");
-            System.exit(1);
-        }
-    }
 
-    public void calculateTimeout(Connection connection, TCPSegment ackPacket) {
-        if (ackPacket.getSequenceNumber == 0) {
+    }
+    
+    /**
+     * Calculate the timeout upon receiving ACK based on formula from assignment
+     * @param ackPacket the packet we received
+     */
+    public void calculateTimeout(TCPSegment ackPacket) {
+        if (ackPacket.getSequenceNumber() == 0) {
             this.estRTT = System.nanoTime() - ackPacket.getTimestamp();
             this.estDev = 0;
-            this.socket.setSoTimeout(2 * estRTT);
+            int estRttMillis = (int)this.estRTT / 1000000;
+            try {
+                this.socket.setSoTimeout(2 * estRttMillis);
+            } catch (SocketException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
         } else {
             long segmentRTT = System.nanoTime() - ackPacket.getTimestamp();
             long segmentDev = Math.abs(segmentRTT - this.estRTT);
-            this.estRTT = (0.875 * this.estRTT) + ((1 - 0.875) * segmentRTT);
-            this.estDev = (0.75 * this.estDev) + ((1- 0.75) * segmentDev);
-            this.socket.setSoTimeout(this.estRTT + (4 * estDev));
+            this.estRTT = (long) ((0.875 * (double) this.estRTT) + ((1 - 0.875) * (double) segmentRTT));
+            this.estDev = (long) ((0.75 * (double) this.estDev) + ((1- 0.75) * (double) segmentDev));
+            int estRttMillis = (int) this.estRTT / 1000000;
+            int estDevMillis = (int) this.estDev / 1000000;
+            try {
+                this.socket.setSoTimeout(estRttMillis + (4 * estDevMillis));
+            } catch (SocketException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
         }
-    }
-
-    /**
-     * Track the timeout and number of retransmissions
-     * @param packet
-     */
-    public void retransmitPacket(TCPSegment packet) {
-        // TODO
     }
 
     public void printPacketSummary(TCPSegment packet) {

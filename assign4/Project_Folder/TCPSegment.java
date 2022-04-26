@@ -16,13 +16,28 @@ public class TCPSegment {
      * SET methods to make sure fields are appropriately set
      * @param data the array that we want to store as the payload
      */
-    public TCPSegment(byte[] data, int offset, int length) {
+    public TCPSegment(byte[] data) {
         this.sequenceNumber = 0;
         this.acknowledgementNumber = 0;
         this.timestamp = 0;
         this.length = 0;
         this.checksum = 0;
         this.data = data;
+        this.dataOffset = 0;
+        this.retransmitAttempts = 0;        
+    }
+
+    /**
+     * default constructor
+     */
+    public TCPSegment() {
+        this.sequenceNumber = 0;
+        this.acknowledgementNumber = 0;
+        this.timestamp = 0;
+        this.length = 0;
+        this.checksum = 0;
+        this.data = null;
+        this.dataOffset = 0;
         this.retransmitAttempts = 0;        
     }
 
