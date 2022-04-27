@@ -8,8 +8,6 @@ public class TCPSegment {
     protected int length;
     protected short checksum;
     protected byte[] data;
-    protected byte dataOffset;
-    protected int retransmitAttempts;
 
     /**
      * Constructor - anytime we create a TCPSegment we should use
@@ -19,12 +17,10 @@ public class TCPSegment {
     public TCPSegment(byte[] data) {
         this.sequenceNumber = 0;
         this.acknowledgementNumber = 0;
-        this.timestamp = 0;
+        this.timestamp = System.nanoTime();
         this.length = 0;
         this.checksum = 0;
         this.data = data;
-        this.dataOffset = 0;
-        this.retransmitAttempts = 0;        
     }
 
     /**
@@ -33,12 +29,10 @@ public class TCPSegment {
     public TCPSegment() {
         this.sequenceNumber = 0;
         this.acknowledgementNumber = 0;
-        this.timestamp = 0;
+        this.timestamp = System.nanoTime();
         this.length = 0;
         this.checksum = 0;
-        this.data = null;
-        this.dataOffset = 0;
-        this.retransmitAttempts = 0;        
+        this.data = null;  
     }
 
     // GET Methods
@@ -68,10 +62,6 @@ public class TCPSegment {
 
     public byte[] getData() {
         return this.data;
-    }
-
-    public int getRetrasmitAttempts() {
-        return this.retransmitAttempts;
     }
     
     // SET methods
@@ -103,10 +93,6 @@ public class TCPSegment {
     public void setData(byte[] data) {
         this.data = data;
     }
-
-    public void setRetransmitAttempts(int attempts) {
-        this.retransmitAttempts = attempts;
-    }
     
     // OTHER methods
 
@@ -120,9 +106,9 @@ public class TCPSegment {
      */
     public byte[] serialize() {
         int length;
-        if (dataOffset == 0)
-            dataOffset = 5;  // default header length
-        length = dataOffset << 2;
+        int dataOffset = 5; // default header length
+
+        length = dataOffset << 2; // multiply by 4 to convert from size in 4 byte words to size in bytes
 
         byte[] data = new byte[length];
         ByteBuffer bb = ByteBuffer.wrap(data);
@@ -131,7 +117,7 @@ public class TCPSegment {
         bb.putInt(this.acknowledgementNumber);
         bb.putLong(this.timestamp);
         bb.putInt(this.length);
-        bb.putShort(0);
+        bb.putShort((short) 0);
         bb.putShort(this.checksum);
         bb.put(this.data);
 
@@ -155,6 +141,7 @@ public class TCPSegment {
         return data;
     }
 
+    /* TODO remove this if not needed
     public TCPPacket deserialize(byte[] data, int offset, int length) {
         ByteBuffer bb = ByteBuffer.wrap(data, offset, length);
         this.sequenceNumber = bb.getInt();
@@ -166,4 +153,5 @@ public class TCPSegment {
         bb.get(this.data); // transfer the rest of the array into the data array?
         return this;
     }
+    */
 }

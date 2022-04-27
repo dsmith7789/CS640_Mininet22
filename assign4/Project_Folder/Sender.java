@@ -7,7 +7,6 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.io.File;
 
 public class Sender {
@@ -190,30 +189,24 @@ public class Sender {
         this.lastReceivedAckOccurrences = newOccurrences;
     }
 
-    /**
-     * Lets us reset the sender's buffer, which is where we will store packets that we've sent, until we get a corresponding 
-     * acknowledgement. The buffer is also useful for tracking congestion.
-     */
-    public void setBuffer(HashMap<Integer, TCPSegment> newBuffer) {
-        this.buffer = newBuffer;
-    }
-
     // OTHER Methods
 
     /**
      * Wrapper method to create DatagramSocket (trying to keep TCPend as clean as possible)
+     * @throws SocketException
      */
-    public void establishSocket() {
+    public void establishSocket() throws SocketException {
         this.socket = new DatagramSocket(this.port);
-        this.socket.connect((InetAddress) this.remoteIP, this.remotePort);
+        this.socket.connect(this.remoteIP, this.remotePort);
     }
 
     /**
      * Pull bytes from the file and package them into TCPSegments so we can send them
      * @param offset what part of the file we should start reading from
      * @return
+     * @throws IOException
      */
-    public TCPSegment gatherData(int offset) {
+    public TCPSegment gatherData(int offset) throws IOException {
         byte[] buffer = new byte[this.mtu];
         this.fileInputStream.read(buffer, offset, buffer.length);
         TCPSegment segment = new TCPSegment();
@@ -235,7 +228,6 @@ public class Sender {
             // TODO Auto-generated catch block
             e.printStackTrace();
         }
-
     }
     
     /**

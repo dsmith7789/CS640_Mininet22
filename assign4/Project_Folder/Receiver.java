@@ -1,7 +1,9 @@
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.SocketException;
 import java.util.ArrayList;
 
 public class Receiver {
@@ -92,8 +94,9 @@ public class Receiver {
 
     /**
     * Wrapper method to create DatagramSocket (trying to keep TCPend as clean as possible)
+     * @throws SocketException
     */
-    public void establishSocket() {
+    public void establishSocket() throws SocketException {
         this.socket = new DatagramSocket(this.port);
     }
 
@@ -136,47 +139,30 @@ public class Receiver {
     // OTHER methods
 
     /**
-     * When datagram packet is received, add to buffer and send ACK back to sender
+     * Write data to the file on receiver
+     * @param segment
+     * @throws IOException
      */
-    public void receivePacket() {
-        // extract TCP segment from DatagramPacket and add the segment to the buffer
-        byte[] payload;
-        DatagramPacket receivedPacket = new DatagramPacket(payload, sender.mtu);
-        this.getSocket().receive(receivedPacket);
-        byte[] buffer = receivedPacket.getData();
-        TCPSegment receivedSegment = new TCPSegment(buffer, 0, buffer.length);
-        this.buffer.put(receivedSegment.getSequenceNumber(), receivedSegment);
-
-        // check if segment sequence number is what we expect
-        if (receivedSegment.getSequenceNumber == this.sequenceNumber) {
-            byte[] data = receivedSegment.getData();
-            this.fileOutputStream.write(data);
-            sendAck(receivedSegment);
-            this.sequenceNumber++;
-        } else {
-            sendAck(receivedSegment);
-        }
+    public void writeData(TCPSegment segment) throws IOException {
+        byte[] buffer = segment.getData();
+        this.fileOutputStream.write(buffer, segment.getSequenceNumber() - 1, segment.getLength());
     }
 
     /**
-     * Write data to the file on receiver
-     * @param segment
+     * Puts TCPSegment into a DatagramPacket
+     * Sends DatagramPacket over DatagramSocket
+     * @param receivedDatagramPacket the DatagramPacket we are responding to
+     * @param packet the TCPSegment
      */
-    public void writeData(TCPSegment segment) {
-        //TODO
+    public void respondToPacket(DatagramPacket receivedDatagramPacket, TCPSegment packet) {
+        DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), 0, this.mtu, receivedDatagramPacket.getAddress(), receivedDatagramPacket.getPort());
+        try {
+            this.socket.send(datagramPacket);
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
     }
-
-    public void sendAck(TCPSegment packet) {
-        TCPSegment ackSegment = new TCPSegment();
-        ackSegment.setSequenceNumber(this.sequenceNumber);
-        ackSegment.setTimestamp = packet.getTimestamp();    // copy sending timestamp
-        ackSegment.setLength(0);
-        ackSegment.setFlags(1);
-        ackSegment.setAcknowledgementNumber(this.sequenceNumber + 1);
-        this.getSocket().send(ackSegment.serialize());
-    }
-
-
 
 
 
