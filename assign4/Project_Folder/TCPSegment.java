@@ -32,7 +32,7 @@ public class TCPSegment {
         this.timestamp = System.nanoTime();
         this.length = 0;
         this.checksum = 0;
-        this.data = null;  
+        this.data = new byte[0];  
     }
 
     // GET Methods
@@ -92,6 +92,7 @@ public class TCPSegment {
 
     public void setData(byte[] data) {
         this.data = data;
+        this.setLength(data.length);
     }
     
     // OTHER methods
@@ -105,19 +106,20 @@ public class TCPSegment {
      * @return byte [] representation of TCP segment
      */
     public byte[] serialize() {
-        int length;
-        int dataOffset = 5; // default header length
+        int headerLength = 20;
+        //int dataOffset = 5; // default header length
 
-        length = dataOffset << 2; // multiply by 4 to convert from size in 4 byte words to size in bytes
+        //headerLength = dataOffset << 2; // multiply by 4 to convert from size in 4 byte words to size in bytes
 
-        byte[] data = new byte[length];
+        byte[] data = new byte[headerLength + this.length];
         ByteBuffer bb = ByteBuffer.wrap(data);
 
         bb.putInt(this.sequenceNumber);
         bb.putInt(this.acknowledgementNumber);
         bb.putLong(this.timestamp);
         bb.putInt(this.length);
-        bb.putShort((short) 0);
+        int allZeros = 0;
+        bb.putShort((short) allZeros);
         bb.putShort(this.checksum);
         bb.put(this.data);
 
@@ -141,17 +143,22 @@ public class TCPSegment {
         return data;
     }
 
-    /* TODO remove this if not needed
-    public TCPPacket deserialize(byte[] data, int offset, int length) {
-        ByteBuffer bb = ByteBuffer.wrap(data, offset, length);
-        this.sequenceNumber = bb.getInt();
-        this.acknowledgementNumber = bb.getInt();
-        this.timestamp = bb.getLong();
-        this.length = bb.getInt();
-        bb.getShort();
-        this.checksum = bb.getShort();
-        bb.get(this.data); // transfer the rest of the array into the data array?
-        return this;
+    public short calculateChecksum() {
+        byte[] data = new byte[this.length + 20];
+        ByteBuffer bb = ByteBuffer.wrap(data);
+        int accumulation = 0;
+
+        for (int i = 0; i < length / 2; ++i) {
+            accumulation += 0xffff & bb.getShort();
+        }
+        // pad to an even number of shorts
+        if (length % 2 > 0) {
+            accumulation += (bb.get() & 0xff) << 8;
+        }
+
+        accumulation = ((accumulation >> 16) & 0xffff) + (accumulation & 0xffff);
+        short checksum = (short) (~accumulation & 0xffff);
+        return checksum;
     }
-    */
+
 }

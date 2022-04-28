@@ -1,4 +1,5 @@
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -26,7 +27,7 @@ public class Receiver {
     protected String filename;
 
     // constructor
-    public Receiver(int port, int mtu, int sws, String filename) {
+    public Receiver(int port, int mtu, int sws, String filename) throws FileNotFoundException {
         this.port = port;
         this.mtu = mtu;
         this.sws = sws;
@@ -152,19 +153,37 @@ public class Receiver {
      * Puts TCPSegment into a DatagramPacket
      * Sends DatagramPacket over DatagramSocket
      * @param receivedDatagramPacket the DatagramPacket we are responding to
-     * @param packet the TCPSegment
+     * @param packet the TCPSegment that we're sending
      */
-    public void respondToPacket(DatagramPacket receivedDatagramPacket, TCPSegment packet) {
+    public void respondToPacket(DatagramPacket receivedDatagramPacket, TCPSegment packet) throws IOException{
         DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), 0, this.mtu, receivedDatagramPacket.getAddress(), receivedDatagramPacket.getPort());
-        try {
-            this.socket.send(datagramPacket);
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
+        this.socket.send(datagramPacket);
+
+        this.printPacketSummary("rcv", packet);
     }
 
+    /**
+     * Receive in DatagramPacket, give the corresponding TCPSegment back, and print summary of what was received
+     * @param packet the incoming DatagramPacket
+     * @return the TCPSegment inside the DatagramPacket
+     * @throws IOException
+     */
+    public TCPSegment receivePacket(DatagramPacket packet) throws IOException {
+        this.getSocket().receive(packet);
+        
+        this.totalPacketsReceived++;
+        
+        byte[] segmentData = packet.getData();
+        TCPSegment segment = new TCPSegment(segmentData);
+        if (isChecksumCorrect(segment) == false) {
+            this.totalIncorrectChecksumPacketsDiscarded++;
+        }
 
+        this.totalBytesOfDataReceived += packet.getLength();
+
+        this.printPacketSummary("rcv", segment);
+        return segment;
+    }
 
 
 
@@ -185,7 +204,9 @@ public class Receiver {
      * @return True if checksum is correct (i.e. we could keep it). False if not (i.e. we'll discard it).
      */
     public boolean isChecksumCorrect(TCPSegment packet) {
-        // TODO
+        short receivedChecksum = packet.getChecksum();
+        short expectedChecksum = packet.calculateChecksum();
+        return (receivedChecksum == expectedChecksum);
     }
 
     /**
@@ -194,16 +215,37 @@ public class Receiver {
      * @return True if packet is in sequence (i.e. we could keep it). False if not (i.e. we'll discard it).
      */
     public boolean isInSequence(TCPSegment packet) {
-        // TODO
+        return this.sequenceNumber <= packet.sequenceNumber;
     }
 
     /**
      * We need to print the following info for each packet we receive:
-     * <rcv> <time> <flag-list> <seq-number> <number of bytes> <ack number>
-     * @param packet the TCP Packet that was sent
+     * <snd/rcv> <time> <flag-list> <seq-number> <number of bytes> <ack number>
+     * @param mode snd or rcv
+     * @param packet the TCP Packet that was sent or received
      */
-    public void printPacketSummary(TCPSegment packet) {
-        // TODO
+    public void printPacketSummary(String mode, TCPSegment packet) {
+        String synFlag = "-";
+        String finFlag = "-";
+        String ackFlag = "-";
+        String dataFlag = "-";
+
+        if ((packet.getFlags() & 4) == 4) {
+            synFlag = "S";
+        }
+        if ((packet.getFlags() & 2) == 2) {
+            finFlag = "F";
+        }
+        if ((packet.getFlags() & 1) == 1) {
+            ackFlag = "A";
+        }
+        if (packet.getData() != null) {
+            dataFlag = "D";
+        }
+
+        System.out.println(mode + " " + (packet.getTimestamp() / 1000000000) + " " + synFlag +
+            " " + ackFlag + " " + finFlag + " " + dataFlag + " " + packet.getSequenceNumber() +
+            " " + packet.getData().length + " " + packet.getAcknowledgementNumber());
     }
 
     /**
@@ -214,7 +256,10 @@ public class Receiver {
      *      Number of packets discarded due to incorrect checksum
      */
     public void printStats() {
-        // TODO
+        System.out.println("Data Received: " + this.totalBytesOfDataReceived + " bytes");
+        System.out.println("Packets Received: " + this.totalPacketsReceived);
+        System.out.println("Packets discarded (Out of sequence): " + this.totalOutOfSequencePacketsDiscarded);
+        System.out.println("Packets discarded (Wrong checksum): " + this.totalIncorrectChecksumPacketsDiscarded);
     }
 
 }
