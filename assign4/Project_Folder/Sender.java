@@ -15,6 +15,7 @@ public class Sender {
     private int sequenceNumber;
     private int totalBytesOfDataSent;
     private int totalPacketsSent;
+    private int totalPacketsReceived;
     private int totalDuplicateAcknowledgements;
     private int totalRetransmissions;
     private int lastReceivedAckNumber;
@@ -25,6 +26,7 @@ public class Sender {
     private long estDev;
     private File file;
     private FileInputStream fileInputStream;
+    protected int maxPayload;
 
     // variables the user provides
     protected int port;           // the port at which this sender will run
@@ -52,6 +54,7 @@ public class Sender {
             System.exit(1);
         }
         this.mtu = mtu;
+        this.maxPayload = this.mtu - 52;    // 52 bytes = IP + UDP + TCP header size in bytes
         this.sws = sws;
     }
 
@@ -203,7 +206,7 @@ public class Sender {
     /**
      * Pull bytes from the file and package them into TCPSegments so we can send them
      * @param offset what part of the file we should start reading from
-     * @return
+     * @return a TCPSegment with the file segment data in it 
      * @throws IOException
      */
     public TCPSegment gatherData(int offset) throws IOException {
@@ -220,14 +223,28 @@ public class Sender {
      * Sends DatagramPacket over DatagramSocket
      * @param packet the TCPSegment
      */
-    public void sendPacket(TCPSegment packet) {
+    public void sendPacket(TCPSegment packet) throws IOException {
         DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), 0, this.mtu, this.remoteIP, this.remotePort);
-        try {
-            this.socket.send(datagramPacket);
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
+        this.socket.send(datagramPacket);
+        this.totalBytesOfDataSent += packet.getLength();
+        this.totalPacketsSent++;
+        this.printPacketSummary("snd", packet);
+    }
+
+    /**
+     * Receive in DatagramPacket, give the corresponding TCPSegment back, and print summary of what was received
+     * @param packet the incoming DatagramPacket
+     * @return the TCPSegment inside the DatagramPacket
+     * @throws IOException
+     */
+    public TCPSegment receivePacket(DatagramPacket packet) throws IOException {
+        this.getSocket().receive(packet);
+        this.totalPacketsReceived++;
+        byte[] segmentData = packet.getData();
+        TCPSegment segment = new TCPSegment(segmentData);
+
+        this.printPacketSummary("rcv", segment);
+        return segment;
     }
     
     /**
@@ -261,12 +278,49 @@ public class Sender {
         }
     }
 
-    public void printPacketSummary(TCPSegment packet) {
-        // TODO
+
+    /**
+     * We need to print the following info for each packet we receive:
+     * <snd/rcv> <time> <flag-list> <seq-number> <number of bytes> <ack number>
+     * @param mode snd or rcv
+     * @param packet the TCP Packet that was sent or received
+     */
+    public void printPacketSummary(String mode, TCPSegment packet) {
+        String synFlag = "-";
+        String finFlag = "-";
+        String ackFlag = "-";
+        String dataFlag = "-";
+
+        if ((packet.getFlags() & 4) == 4) {
+            synFlag = "S";
+        }
+        if ((packet.getFlags() & 2) == 2) {
+            finFlag = "F";
+        }
+        if ((packet.getFlags() & 1) == 1) {
+            ackFlag = "A";
+        }
+        if (packet.getData() != null) {
+            dataFlag = "D";
+        }
+
+        System.out.println(mode + " " + (packet.getTimestamp() / 1000000000) + " " + synFlag +
+            " " + ackFlag + " " + finFlag + " " + dataFlag + " " + packet.getSequenceNumber() +
+            " " + packet.getData().length + " " + packet.getAcknowledgementNumber());
     }
 
+    /**
+     * After the connection is closed, this method will print out information:
+     *      Amount of data transferred
+     *      Number of packets sent
+     *      Number of retransmissions
+     *      Number of duplicate acknowledgements
+     */
     public void printStats() {
-
+        System.out.println("Data Transferred: " + this.totalBytesOfDataSent + " bytes");
+        System.out.println("Packets sent: " + this.totalPacketsSent);
+        System.out.println("Retransmissions: " + this.totalRetransmissions);
+        System.out.println("Duplicate Acknowledgements: " + this.totalDuplicateAcknowledgements);
     }
 
 }
