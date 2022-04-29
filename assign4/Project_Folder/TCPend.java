@@ -2,9 +2,6 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.SocketTimeoutException;
 
-import javax.sql.rowset.serial.SerialArray;
-
-
 public class TCPend {
     
     public static void main (String[] args) throws IOException {
@@ -189,9 +186,7 @@ public class TCPend {
         boolean receivedAck = false;
         TCPSegment finPacket = new TCPSegment();
         finPacket.setSequenceNumber(sender.getSequenceNumber());
-        finPacket.setAcknowledgementNumber(1);  // all ACKs from receiver have length 0
-        finPacket.setTimestamp(System.nanoTime());
-        finPacket.setLength(0);
+        finPacket.setAcknowledgementNumber(1);  // all ACKs from receiver have sequence number 0
         finPacket.setFlags(3);
 
         int attempts = 0;
@@ -311,7 +306,6 @@ public class TCPend {
         finPacket.setSequenceNumber(1);
         finPacket.setAcknowledgementNumber(receiver.getSequenceNumber() + 1);
         finPacket.setTimestamp(receivedSegment.getTimestamp());
-        finPacket.setLength(0);
         finPacket.setFlags(3);
 
         byte[] finalAckBuf = new byte[receiver.maxTcpSegment];
@@ -351,8 +345,7 @@ public class TCPend {
                 // package data from file into a segment, format segment header, and send the segment
                 TCPSegment sendSegment = sender.gatherData(sender.getSequenceNumber());
                 sendSegment.setSequenceNumber(sender.getSequenceNumber());
-                sendSegment.setAcknowledgementNumber(sender.getLastReceivedAckNumber());
-                sendSegment.setTimestamp(System.nanoTime());
+                sendSegment.setAcknowledgementNumber(1);        // should be 1 because we aren't receiving data from receiver
                 sendSegment.setLength(sendSegment.getData().length);
                 sendSegment.setFlags(1);    // all packets should have ACK flag set
                 sender.sendPacket(sendSegment);
@@ -374,10 +367,10 @@ public class TCPend {
                 if (sender.getLastReceivedAckOccurrences() > 2) {
                     sender.setTotalRetransmissions(sender.getTotalRetransmissions() + sender.getBuffer().size());
                     sender.getBuffer().clear();
-                    sender.setSequenceNumber(sender.getLastReceivedAckNumber() - 1);
+                    sender.setSequenceNumber(sender.getLastReceivedAckNumber());
                 }
             } else if (ack > sender.getLastReceivedAckNumber()) {
-                sender.setSequenceNumber(ack - 1);
+                sender.setSequenceNumber(ack);
                 sender.setLastReceivedAckNumber(ack);
                 sender.setLastReceivedAckOccurrences(0);
                 // drop all  the packets from the buffer that we can
@@ -393,7 +386,7 @@ public class TCPend {
     /**
      * Handles waiting for ACKs to come back in from the receiver
      * @param sender
-     * @return -1 if we retransmitted 16 times without getting an ACK back (error), otherwise returns the ACK
+     * @return null if we retransmitted 16 times without getting an ACK back (error), otherwise returns an ACK packet the receiver sent
      * @throws IOException
      */
     public static TCPSegment senderReceiveMethod(Sender sender) throws IOException {
@@ -462,14 +455,12 @@ public class TCPend {
                 receiver.getBuffer().add(receivedSegment);
             }
 
-            int bytesWritten = 0;
             if (seq == receiver.getSequenceNumber()) {
                 // write everything we can to the file and remove from buffer
                 for (int i = (receiver.getBuffer().size() - 1); i >= 0; i--) {
                     TCPSegment segment = receiver.getBuffer().get(i);
                     if (segment.getSequenceNumber() <= seq) {
                         receiver.writeData(segment);
-                        bytesWritten = bytesWritten + segment.getData().length;
                         receiver.getBuffer().remove(i);
                     }
                 }
@@ -480,8 +471,6 @@ public class TCPend {
             ackPacket.setAcknowledgementNumber(receiver.getSequenceNumber());
             ackPacket.setTimestamp(receivedSegment.getTimestamp());
             ackPacket.setFlags(1);
-            //DatagramPacket datagramPacket = new DatagramPacket(ackPacket.serialize(), 0, receiver.mtu, receivedPacket.getAddress(), receivedPacket.getPort());
-            receiver.setSequenceNumber(receiver.getSequenceNumber() + bytesWritten + 1);
             receiver.respondToPacket(receivedPacket, ackPacket);
         }
     }
