@@ -2,6 +2,8 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.SocketTimeoutException;
 
+import javax.sql.rowset.serial.SerialArray;
+
 
 public class TCPend {
     
@@ -61,8 +63,8 @@ public class TCPend {
         synPacket.setFlags(4);
         boolean receivedSynAck = false;
         int attempts = 0;
-        byte[] buf = new byte[sender.mtu];
-        DatagramPacket potentialSynAckPacket = new DatagramPacket(buf, 28, sender.mtu - 28);
+        byte[] buf = new byte[sender.maxTcpSegment];
+        DatagramPacket potentialSynAckPacket = new DatagramPacket(buf, buf.length);
         while (receivedSynAck == false && attempts < 16) {
             
             try {
@@ -94,8 +96,8 @@ public class TCPend {
 
         boolean ackPacketWasReceived = false;
         attempts = 0;
-        byte[] duplicateSynAckPayload = new byte[sender.mtu];
-        DatagramPacket duplicateSynAckDatagramPacket = new DatagramPacket(duplicateSynAckPayload, sender.mtu);
+        byte[] duplicateSynAckBuffer = new byte[sender.maxPayload];
+        DatagramPacket duplicateSynAckDatagramPacket = new DatagramPacket(duplicateSynAckBuffer, duplicateSynAckBuffer.length);
         while ((ackPacketWasReceived == false) && (attempts < 16)) {
             try {
                 sender.sendPacket(ackPacket);
@@ -121,8 +123,8 @@ public class TCPend {
         // read the SYN packet from the sender
         boolean receivedSyn= false;
         TCPSegment receivedSegment = new TCPSegment();
-        byte[] payload = new byte[receiver.mtu];
-        DatagramPacket synDatagramPacket = new DatagramPacket(payload, receiver.mtu);
+        byte[] buf = new byte[receiver.maxTcpSegment];
+        DatagramPacket synDatagramPacket = new DatagramPacket(buf, buf.length);
         while (receivedSyn == false) {
             receivedSegment = receiver.receivePacket(synDatagramPacket);
             int flags = receivedSegment.getFlags();
@@ -149,8 +151,8 @@ public class TCPend {
                 receiver.respondToPacket(synDatagramPacket, synAckPacket); // send a SYN + ACK in response
 
                 // receive in what should be the final ACK from sender to establish the connection
-                byte[] buffer = new byte[receiver.mtu];
-                DatagramPacket finalAckDatagramPacket = new DatagramPacket(buffer, receiver.mtu);
+                byte[] buffer = new byte[receiver.maxTcpSegment];
+                DatagramPacket finalAckDatagramPacket = new DatagramPacket(buffer, buffer.length);
                 TCPSegment finalAckTcpSegment = receiver.receivePacket(finalAckDatagramPacket);
 
                 // check to make sure this is an ACK we got back
@@ -196,8 +198,8 @@ public class TCPend {
         while ((receivedAck == false) && (attempts < 16)) {
             try {
                 sender.sendPacket(finPacket);
-                byte[] payload = new byte[sender.mtu];
-                DatagramPacket ackPacket = new DatagramPacket(payload, sender.mtu);
+                byte[] buf = new byte[sender.maxTcpSegment];
+                DatagramPacket ackPacket = new DatagramPacket(buf, buf.length);
                 TCPSegment receivedSegment = sender.receivePacket(ackPacket);
                 int flags = receivedSegment.getFlags();
                 if ((flags & 0x1) != 0x1) {
@@ -219,8 +221,8 @@ public class TCPend {
         // now we need to wait for the FIN to come in from the receiver
         boolean receivedFin = false;
         TCPSegment receivedSegment = new TCPSegment();
-        byte[] payload = new byte[sender.mtu];
-        DatagramPacket finDatagramPacket = new DatagramPacket(payload, sender.mtu);
+        byte[] buf = new byte[sender.maxTcpSegment];
+        DatagramPacket finDatagramPacket = new DatagramPacket(buf, buf.length);
         while (receivedFin == false) {
             receivedSegment = sender.receivePacket(finDatagramPacket);
             int flags = receivedSegment.getFlags();
@@ -240,8 +242,8 @@ public class TCPend {
         sender.getSocket().setSoTimeout(timeout * 16);
         attempts = 0;
         boolean receiverGotFinalAck = false;
-        byte[] duplicateFinPayload = new byte[sender.mtu];
-        DatagramPacket duplicateFinDatagramPacket = new DatagramPacket(duplicateFinPayload, sender.mtu);
+        byte[] duplicateFinBuf = new byte[sender.maxTcpSegment];
+        DatagramPacket duplicateFinDatagramPacket = new DatagramPacket(duplicateFinBuf, duplicateFinBuf.length);
         while ((attempts < 16) && (receiverGotFinalAck == false)) {
             try {
                 attempts++;
@@ -270,8 +272,8 @@ public class TCPend {
         // read the FIN packet from the sender
         boolean receivedFin = false;
         TCPSegment receivedSegment = new TCPSegment();
-        byte[] payload = new byte[receiver.mtu];
-        DatagramPacket finDatagramPacket = new DatagramPacket(payload, receiver.mtu);
+        byte[] buf = new byte[receiver.maxTcpSegment];
+        DatagramPacket finDatagramPacket = new DatagramPacket(buf, buf.length);
         while (receivedFin == false) {
             receivedSegment = receiver.receivePacket(finDatagramPacket);
             int flags = receivedSegment.getFlags();
@@ -287,8 +289,8 @@ public class TCPend {
         boolean ackSentSuccessfully = false;
         int attempts = 0;
         TCPSegment ackSegment = new TCPSegment();
-        byte[] duplicateFinPayload = new byte[receiver.mtu];
-        DatagramPacket duplicateFinDatagramPacket = new DatagramPacket(duplicateFinPayload, receiver.mtu);
+        byte[] duplicateFinBuf = new byte[receiver.maxTcpSegment];
+        DatagramPacket duplicateFinDatagramPacket = new DatagramPacket(duplicateFinBuf, duplicateFinBuf.length);
         receiver.getSocket().setSoTimeout(5000);    // need to temporarily set the receiver socket timeout again
         while (ackSentSuccessfully == false && attempts < 16) {
             try {
@@ -312,8 +314,8 @@ public class TCPend {
         finPacket.setLength(0);
         finPacket.setFlags(3);
 
-        byte[] finalAckPayload = new byte[receiver.mtu];
-        DatagramPacket finalAckDatagramPacket = new DatagramPacket(finalAckPayload, receiver.mtu);
+        byte[] finalAckBuf = new byte[receiver.maxTcpSegment];
+        DatagramPacket finalAckDatagramPacket = new DatagramPacket(finalAckBuf, receiver.mtu);
         boolean finalAckReceived = false;
         attempts = 0;
         while (finalAckReceived == false && attempts < 16) {
@@ -398,8 +400,8 @@ public class TCPend {
         int attempts = 0;
         while (attempts < 16) {
             try {
-                byte[] buffer = new byte[sender.mtu];
-                DatagramPacket packet = new DatagramPacket(buffer, sender.mtu);
+                byte[] buf = new byte[sender.maxTcpSegment];
+                DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 TCPSegment segment = sender.receivePacket(packet);
                 return segment;
             } catch (SocketTimeoutException e) {
@@ -491,8 +493,8 @@ public class TCPend {
      */
     public static DatagramPacket receiverReceiveMethod(Receiver receiver) {
         try {
-            byte[] buffer = new byte[receiver.mtu];
-            DatagramPacket packet = new DatagramPacket(buffer, receiver.mtu);
+            byte[] buf = new byte[receiver.maxTcpSegment];
+            DatagramPacket packet = new DatagramPacket(buf, buf.length);
             TCPSegment segment = receiver.receivePacket(packet);
             return packet;
         } catch (SocketTimeoutException e) {

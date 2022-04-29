@@ -27,6 +27,7 @@ public class Sender {
     private File file;
     private FileInputStream fileInputStream;
     protected int maxPayload;
+    protected int maxTcpSegment;
 
     // variables the user provides
     protected int port;           // the port at which this sender will run
@@ -55,6 +56,7 @@ public class Sender {
         }
         this.mtu = mtu;
         this.maxPayload = this.mtu - 52;    // 52 bytes = IP + UDP + TCP header size in bytes
+        this.maxTcpSegment = this.mtu - 28;  // 28 bytes = IP + UDP header size in bytes
         this.sws = sws;
     }
 
