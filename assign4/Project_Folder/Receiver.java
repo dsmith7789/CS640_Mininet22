@@ -150,7 +150,8 @@ public class Receiver {
      */
     public void writeData(TCPSegment segment) throws IOException {
         byte[] buffer = segment.getData();
-        this.fileOutputStream.write(buffer, segment.getSequenceNumber() - 1, segment.getLength());
+        this.fileOutputStream.write(buffer, segment.getSequenceNumber(), segment.getLength());
+        this.sequenceNumber += segment.length;
     }
 
     /**
@@ -160,10 +161,9 @@ public class Receiver {
      * @param packet the TCPSegment that we're sending
      */
     public void respondToPacket(DatagramPacket receivedDatagramPacket, TCPSegment packet) throws IOException{
-        DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), 0, this.mtu, receivedDatagramPacket.getAddress(), receivedDatagramPacket.getPort());
+        DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), packet.serialize().length, receivedDatagramPacket.getAddress(), receivedDatagramPacket.getPort());
         this.socket.send(datagramPacket);
-
-        this.printPacketSummary("rcv", packet);
+        this.printPacketSummary("snd", packet);
     }
 
     /**
@@ -188,18 +188,6 @@ public class Receiver {
         this.printPacketSummary("rcv", segment);
         return segment;
     }
-
-
-
-
-
-
-
-
-
-
-
-
 
     /**
      * Use this method as a wrapper to check if the checksum on the incoming packet is correct.
@@ -243,7 +231,7 @@ public class Receiver {
         if ((packet.getFlags() & 1) == 1) {
             ackFlag = "A";
         }
-        if (packet.getData() != null) {
+        if (packet.getLength() > 0) {
             dataFlag = "D";
         }
 

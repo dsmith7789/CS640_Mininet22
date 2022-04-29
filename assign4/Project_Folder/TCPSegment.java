@@ -1,4 +1,5 @@
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 public class TCPSegment {
 
@@ -15,12 +16,14 @@ public class TCPSegment {
      * @param data the array that we want to store as the payload
      */
     public TCPSegment(byte[] data) {
-        this.sequenceNumber = 0;
-        this.acknowledgementNumber = 0;
-        this.timestamp = System.nanoTime();
-        this.length = 0;
-        this.checksum = 0;
-        this.data = data;
+        ByteBuffer bb = ByteBuffer.wrap(data);
+        this.sequenceNumber = bb.getInt();
+        this.acknowledgementNumber = bb.getInt();
+        this.timestamp = bb.getLong();
+        this.length = bb.getInt();
+        bb.getShort();
+        this.checksum = bb.getShort();
+        this.data = Arrays.copyOfRange(data, bb.position(), bb.limit());
     }
 
     /**
@@ -106,7 +109,7 @@ public class TCPSegment {
      * @return byte [] representation of TCP segment
      */
     public byte[] serialize() {
-        int headerLength = 20;
+        int headerLength = 24;
         //int dataOffset = 5; // default header length
 
         //headerLength = dataOffset << 2; // multiply by 4 to convert from size in 4 byte words to size in bytes
@@ -118,8 +121,7 @@ public class TCPSegment {
         bb.putInt(this.acknowledgementNumber);
         bb.putLong(this.timestamp);
         bb.putInt(this.length);
-        int allZeros = 0;
-        bb.putShort((short) allZeros);
+        bb.putShort((short) 0);
         bb.putShort(this.checksum);
         bb.put(this.data);
 

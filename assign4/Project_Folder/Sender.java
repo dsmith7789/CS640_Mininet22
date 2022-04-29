@@ -202,6 +202,7 @@ public class Sender {
      */
     public void establishSocket() throws SocketException {
         this.socket = new DatagramSocket(this.port);
+        this.socket.setSoTimeout(3000);
         this.socket.connect(this.remoteIP, this.remotePort);
     }
 
@@ -226,7 +227,7 @@ public class Sender {
      * @param packet the TCPSegment
      */
     public void sendPacket(TCPSegment packet) throws IOException {
-        DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), 0, this.mtu, this.remoteIP, this.remotePort);
+        DatagramPacket datagramPacket = new DatagramPacket(packet.serialize(), packet.serialize().length, this.remoteIP, this.remotePort);
         this.socket.send(datagramPacket);
         this.totalBytesOfDataSent += packet.getLength();
         this.totalPacketsSent++;
@@ -302,7 +303,7 @@ public class Sender {
         if ((packet.getFlags() & 1) == 1) {
             ackFlag = "A";
         }
-        if (packet.getData() != null) {
+        if (packet.getLength() > 0) {
             dataFlag = "D";
         }
 
