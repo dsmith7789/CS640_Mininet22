@@ -19,6 +19,8 @@ public class Receiver {
     private DatagramSocket socket;
     private File file;
     private FileOutputStream fileOutputStream;
+    protected int maxPayload;
+    protected int maxTcpSegment;
 
     // variables the user provides
     protected int port;
@@ -34,6 +36,8 @@ public class Receiver {
         this.filename = filename;
         this.file = new File(filename);
         this.fileOutputStream = new FileOutputStream(this.file);
+        this.maxPayload = this.mtu - 52;    // 52 bytes = IP + UDP + TCP header size in bytes
+        this.maxTcpSegment = this.mtu - 28;  // 28 bytes = IP + UDP header size in bytes
     }
 
     // "GETTER" methods
