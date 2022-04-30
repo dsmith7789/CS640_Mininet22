@@ -1,0 +1,76 @@
+#!/usr/bin/python
+
+from mininet.node import Host
+from mininet.topo import Topo
+from mininet.net import Mininet
+from mininet.cli import CLI
+from mininet.log import setLogLevel, info
+import argparse
+import os
+
+class TestTopo(Topo):
+    def __init__(self, **args):
+        super(TestTopo, self).__init__(**args)
+        self.d_nodes = {}
+        self.d_nodes["h1"] = self.addHost('h1')
+        self.d_nodes["h2"] = self.addHost('h2')
+        self.d_nodes["s1"] = self.addSwitch('s1', dpid="1")
+        self.addLink(self.d_nodes["h1"], self.d_nodes["s1"])
+        self.addLink(self.d_nodes["h2"], self.d_nodes["s1"])
+
+def setup_rx_loss(net, host, percentage):
+    h = net.get(host)
+    info("*** Adding %d%% RX drop on %s\n" % (percentage, host))
+    h.cmd("iptables -A INPUT -m statistic --mode random --probability %f -j DROP" % (percentage / 100.0))
+
+def setup_tx_corruption(net, host, percentage):
+    h = net.get(host)
+    interface = "%s-eth0" % host
+    info("*** Adding %d%% TX corruption on %s\n" % (percentage, host))
+    h.cmd("tc qdisc add dev %s root netem corrupt %d%%" % (interface, percentage))
+
+def start_capture(net, host):
+    h = net.get(host)
+    info ('*** Starting packet capture on host %s to /tmp/%s.pcap\n' % (host, host))
+    h.cmd('tcpdump -ni %s-eth0 -s 65535 -w /tmp/%s.pcap ip &' % (host, host))
+
+def disable_v6(net, host):
+    h = net.get(host)
+    info ('*** Disabling IPv6 on host %s\n' % host)
+    h.cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+    h.cmd("sysctl -w net.ipv6.conf.lo.disable_ipv6=1")
+    h.cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
+
+if __name__ == "__main__":
+    # Options
+    setLogLevel("info")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ds', help="Drop percentage at server RX (h2)", type=int)
+    parser.add_argument('--dc', help="Drop percentage at client RX (h1)", type=int)
+    parser.add_argument('--cs', help="Corrupt percentage at server TX (h2)", type=int)
+    parser.add_argument('--cc', help="Corrupt percentage at client TX (h1)", type=int)
+    # parser.add_argument('--script', help="Use a text file as mininet command input", type=open)
+    args = parser.parse_args()
+
+    os.system("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+    os.system("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
+
+    topo = TestTopo()
+    net = Mininet(topo=topo, autoSetMacs=True)
+    net.start()
+    for node in net:
+        if isinstance(net.get(node), Host):
+            disable_v6(net, node)
+    if args.ds:
+        setup_rx_loss(net, "h2", args.ds)
+    if args.dc:
+        setup_rx_loss(net, "h1", args.dc)
+    if args.cs:
+        setup_tx_corruption(net, "h2", args.cs)
+    if args.cc:
+        setup_tx_corruption(net, "h1", args.cc)
+    #if args.script:
+    #    CLI(net, stdin = args.script)
+    #else:
+    CLI(net)
+    net.stop()

@@ -152,6 +152,11 @@ public class Receiver {
      */
     public void writeData(TCPSegment segment) throws IOException {        
         byte[] buffer = segment.getData();
+
+        for (int i = 0; i < segment.getData().length; i++) {
+            System.out.print((char) segment.getData()[i]);
+        }
+
         this.fileOutputStream.write(buffer);
         this.sequenceNumber += segment.getLength();
     }
