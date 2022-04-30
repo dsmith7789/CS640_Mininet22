@@ -1,5 +1,0 @@
-Sender
-java TCPend -p 5000 -s 10.0.0.2 -a 5000 -f TestFile.txt -m 1000 -c 4
-
-Receiver
-java TCPend -p 5000 -m 1000 -c 4 -f RecvFile
