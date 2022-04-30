@@ -6,6 +6,7 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.io.File;
 
@@ -219,7 +220,18 @@ public class Sender {
         this.fileInputStream.read(buffer);
         TCPSegment segment = new TCPSegment();
         segment.setData(buffer);
+
+        for (int i = 0; i < segment.getData().length; i++) {
+            System.out.print((char) segment.getData()[i]);
+        }
+
         return segment;
+    }
+
+    public void backtrackFileChannel(int newPosition) throws IOException {
+        System.out.println("Backtracking to position " + newPosition);
+        FileChannel channel = this.fileInputStream.getChannel();
+        channel.position((long) newPosition);
     }
 
     /**

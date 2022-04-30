@@ -387,6 +387,7 @@ public class TCPend {
                 if (sender.getLastReceivedAckOccurrences() > 2) {
                     sender.setTotalRetransmissions(sender.getTotalRetransmissions() + sender.getBuffer().size());
                     sender.getBuffer().clear();
+                    sender.backtrackFileChannel(sender.getLastReceivedAckNumber());
                     sender.setSequenceNumber(sender.getLastReceivedAckNumber());
                 }
             } else if (ack > sender.getLastReceivedAckNumber()) {
@@ -498,7 +499,7 @@ public class TCPend {
                 for (int i = (receiver.getBuffer().size() - 1); i >= 0; i--) {
                     TCPSegment segment = receiver.getBuffer().get(i);
                     if (segment.getSequenceNumber() <= seq) {
-                        //System.out.println("Writing Data");
+                        System.out.println("Writing Data for packet with seq " + segment.getSequenceNumber());
                         receiver.writeData(segment);
                         receiver.getBuffer().remove(i);
                     }
